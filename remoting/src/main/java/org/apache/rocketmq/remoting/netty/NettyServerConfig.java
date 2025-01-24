@@ -25,10 +25,13 @@ public class NettyServerConfig implements Cloneable {
     // 业务线程池，执行handler的EventLoop线程池组
     private int serverWorkerThreads = 8;
 
-    //根据这个值创建一个publicExecutor线程值
+    /**
+     * 根据这个值创建一个publicExecutor线程值.netty会根据不同的业务类型创建不同的线程池
+     * 比如处理消息发送，消息消费，心跳检测等，如果当前业务类型没有注册线程池，则使用publicExecutor线程池
+     */
     private int serverCallbackExecutorThreads = 0;
 
-    //worker工作组线程池线程数量？？？
+    //worker工作组线程池线程数量，I/O线程池个数，主要处理网络请求。
     private int serverSelectorThreads = 3;
 
     //服务端单向访问客户端的并发数限制
@@ -41,10 +44,10 @@ public class NettyServerConfig implements Cloneable {
     private int serverChannelMaxIdleTimeSeconds = 120;
 
 
-    //写缓冲区大小
+    //网络socket发送缓存区大小 默认64KB
     private int serverSocketSndBufSize = NettySystemConfig.socketSndbufSize;
 
-    //读缓冲区大小
+    //网络socket接收缓存区大小 默认64KB
     private int serverSocketRcvBufSize = NettySystemConfig.socketRcvbufSize;
 
     //写缓冲区最高水位标记
@@ -53,7 +56,7 @@ public class NettyServerConfig implements Cloneable {
     //写缓冲区最低水位标记
     private int writeBufferLowWaterMark = NettySystemConfig.writeBufferLowWaterMark;
 
-
+    // TCP连接队列大小，默认1024
     private int serverSocketBacklog = NettySystemConfig.socketBacklog;
 
     // 是否开启服务端netty内存池优化
@@ -66,7 +69,7 @@ public class NettyServerConfig implements Cloneable {
      * ../glibc-2.10.1/configure \ --prefix=/usr \ --with-headers=/usr/include \
      * --host=x86_64-linux-gnu \ --build=x86_64-pc-linux-gnu \ --without-gd
      */
-    // 是否开启epoll
+    // 是否开启epoll，Linux下建议开启
     private boolean useEpollNativeSelector = false;
 
     public int getListenPort() {

@@ -23,22 +23,22 @@ import org.apache.rocketmq.common.constant.PermName;
 import org.apache.rocketmq.common.message.MessageQueue;
 import org.apache.rocketmq.common.protocol.route.QueueData;
 import org.apache.rocketmq.common.protocol.route.TopicRouteData;
-
+// 当前topic对应的消息队列元数据，用在消息发送时，选择队列
 public class TopicPublishInfo {
 
-    //
+    // 顺序消息主题
     private boolean orderTopic = false;
 
     // 是否有topic路由信息
     private boolean haveTopicRouterInfo = false;
 
-    // MessageQueue列表
+    // topic对应的消息队列的MessageQueue列表
     private List<MessageQueue> messageQueueList = new ArrayList<MessageQueue>();
 
-    // 线程级别的sendWhichQueue
+    // 线程级别的sendWhichQueue，每次选择Queue当前值都会自增1，如果超过Integer的最大值就会重置为0
     private volatile ThreadLocalIndex sendWhichQueue = new ThreadLocalIndex();
 
-    // topic路由数据
+    // topic队列元数据
     private TopicRouteData topicRouteData;
 
     public boolean isOrderTopic() {

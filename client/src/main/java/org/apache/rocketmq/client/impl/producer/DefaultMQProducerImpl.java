@@ -177,7 +177,6 @@ public class DefaultMQProducerImpl implements MQProducerInner {
 
         // 创建 默认异步消息发送线程池
         this.defaultAsyncSenderExecutor = new ThreadPoolExecutor(
-
                 // 核心线程数量为当前生产者服务核心数量
             Runtime.getRuntime().availableProcessors(),
 
@@ -261,10 +260,10 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                     this.defaultMQProducer.changeInstanceNameToPID();
                 }
 
-                //通过客户端管理对象获取当前的MQClientInstance对象mQClientFactory
+                //通过客户端管理对象获取当前的MQClientInstance对象，整个JVM只有一个MQClientManager实例
                 this.mQClientFactory = MQClientManager.getInstance().getOrCreateMQClientInstance(this.defaultMQProducer, rpcHook);
 
-                // 将当前生产者注册到mQClientFactory中
+                // 将当前生产者注册到MQClientInstance中
                 boolean registerOK = mQClientFactory.registerProducer(this.defaultMQProducer.getProducerGroup(), this);
 
                 // 如果注册失败
@@ -639,7 +638,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         // 本轮发送的结束时间
         long endTimestamp = beginTimestampFirst;
 
-        // 获取消息topic的主题发布信息，依赖MessageQueue来选择一个合适的队列来发送
+        // 获取消息topic的主题发布信息，通过MessageQueue来选择一个合适的队列来发送
         TopicPublishInfo topicPublishInfo = this.tryToFindTopicPublishInfo(msg.getTopic());
 
         // 获取到当前topic对应的主题发布信息
@@ -827,8 +826,14 @@ public class DefaultMQProducerImpl implements MQProducerInner {
             null).setResponseCode(ClientErrorCode.NOT_FOUND_TOPIC_EXCEPTION);
     }
 
-    // 获取topic的topicPublishInfo信息
-    // 参数一：topic
+    /**
+     * 第一次发送消息时，本地没有缓存topic的路由信息，向nameSrv获取路由信息，获取成功之后更新到本地topicPublishInfoTable中
+     * 如果从nameSrv获取对应的topic路由信息失败，再次尝试用默认topic(DefaultMQProducer#createTopicKey=TBW102)去查询
+     * 如果broker启动过程中设置运行创建默认topic(broker参数autoCreateTopicEnable控制)则返回默认的TBW102的topic主题发布信息
+     *
+     * @param topic topic
+     * @return topic对应的主题发布信息
+     */
     private TopicPublishInfo tryToFindTopicPublishInfo(final String topic) {
 
         // 从topicPublish映射表中获取当前topic的发布信息
@@ -836,10 +841,10 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         if (null == topicPublishInfo || !topicPublishInfo.ok()) {
             this.topicPublishInfoTable.putIfAbsent(topic, new TopicPublishInfo());
 
-            // 客户端从namesrv更新该topic的路由数据
+            // 客户端从nameSrv获取topic发布数据并更新topicPublishInfoTable映射表中的信息
             this.mQClientFactory.updateTopicRouteInfoFromNameServer(topic);
 
-            //可能存在namesrv没有当前topic的路由数据，所以此时根据当前topic获取路由topicPublishnull
+            //从nameSrv获取并更新topicPublishInfoTable映射表数据之后再次获取
             topicPublishInfo = this.topicPublishInfoTable.get(topic);
         }
 
@@ -847,11 +852,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         if (topicPublishInfo.isHaveTopicRouterInfo() || topicPublishInfo.ok()) {
             return topicPublishInfo;
         } else {
-
-            // 再次获取topic对应的主题发布信息，此时调用参数发生了变化
-            // 参数一：主题
-            // 参数二：isDefault =true
-            // 参数三：当前生产者
+            // 获取默认的DefaultMQProducer#createTopicKey=TBW102的topic主题发布信息
             this.mQClientFactory.updateTopicRouteInfoFromNameServer(topic, true, this.defaultMQProducer);
             topicPublishInfo = this.topicPublishInfoTable.get(topic);
             return topicPublishInfo;

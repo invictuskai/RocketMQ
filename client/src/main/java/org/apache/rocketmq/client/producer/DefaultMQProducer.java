@@ -97,7 +97,7 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
      */
 
     /**
-     * 生产者组，发送事务消息时，broker进行事务回查时可以选择当前生产组下任意一个生产者进行回查
+     * 生产者所属组，消息服务器在回查事务状态时会随机选择该组中任何一个生产者发起的事务回查请求。
      */
     private String producerGroup;
 
@@ -105,7 +105,7 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
      * Just for testing or demo program
      */
 
-    // broker端写死的主体队列信息，一是可以用来测试。二是当发送消息指定的topic信息在namesrv没有找到路由信息，可以使用TBW102为模板创建topic
+    // broker端写死的主体队列信息，一是可以用来测试。二是当发送消息指定的topic信息在nameSrv没有找到路由信息，可以使用TBW102为模板创建topic
     private String createTopicKey = TopicValidator.AUTO_CREATE_TOPIC_KEY_TOPIC;
 
     /**
@@ -151,7 +151,7 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
      * Indicate whether to retry another broker on sending failure internally.
      */
 
-    // 消息未存储成功，是否选择其他broker节点进行重试，一般设置为true
+    // 消息重试时选择另外一个Broker，是否不等待存储结果就返回，默认为false。
     private boolean retryAnotherBrokerWhenNotStoreOK = false;
 
     /**
@@ -358,6 +358,7 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
      * @return List of message queues readily to send messages to
      * @throws MQClientException if there is any client error.
      */
+    // 查找该主题下所有的消息队列。
     @Override
     public List<MessageQueue> fetchPublishMessageQueues(String topic) throws MQClientException {
         return this.defaultMQProducerImpl.fetchPublishMessageQueues(withNamespace(topic));
@@ -378,6 +379,7 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
      * @throws MQBrokerException if there is any error with broker.
      * @throws InterruptedException if the sending thread is interrupted.
      */
+    // 同步发送消息，具体发送到主题中的哪个消息队列由负载算法决定。
     @Override
     public SendResult send(
         Message msg) throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
@@ -397,6 +399,7 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
      * @throws MQBrokerException if there is any error with broker.
      * @throws InterruptedException if the sending thread is interrupted.
      */
+    // 同步发送消息，如果发送超过timeout则抛出超时异常。
     @Override
     public SendResult send(Message msg,
         long timeout) throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
@@ -419,6 +422,7 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
      * @throws RemotingException if there is any network-tier error.
      * @throws InterruptedException if the sending thread is interrupted.
      */
+    // 异步发送消息，sendCallback参数是消息发送成功后的回调方法。
     @Override
     public void send(Message msg,
         SendCallback sendCallback) throws MQClientException, RemotingException, InterruptedException {
@@ -436,6 +440,7 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
      * @throws RemotingException if there is any network-tier error.
      * @throws InterruptedException if the sending thread is interrupted.
      */
+    //异步发送消息，sendCallback参数是消息发送成功后的回调方法。超过timeout抛出异常
     @Override
     public void send(Message msg, SendCallback sendCallback, long timeout)
         throws MQClientException, RemotingException, InterruptedException {
@@ -452,6 +457,7 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
      * @throws RemotingException if there is any network-tier error.
      * @throws InterruptedException if the sending thread is interrupted.
      */
+    // 单向方式发送消息，且发送到指定的消息队列。
     @Override
     public void sendOneway(Message msg) throws MQClientException, RemotingException, InterruptedException {
         msg.setTopic(withNamespace(msg.getTopic()));
@@ -561,6 +567,7 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
      * @throws MQBrokerException if there is any error with broker.
      * @throws InterruptedException if the sending thread is interrupted.
      */
+    // 消息发送，指定消息选择算法，覆盖消息生产者默认的消息队列负载。
     @Override
     public SendResult send(Message msg, MessageQueueSelector selector, Object arg)
         throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
@@ -838,6 +845,8 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
      * @return Consume queue offset.
      * @throws MQClientException if there is any client error.
      */
+
+    // 根据时间戳从队列中查找其偏移量
     @Override
     public long searchOffset(MessageQueue mq, long timestamp) throws MQClientException {
         return this.defaultMQProducerImpl.searchOffset(queueWithNamespace(mq), timestamp);
@@ -867,6 +876,8 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
      * @return minimum offset of the given message queue.
      * @throws MQClientException if there is any client error.
      */
+
+    // 查找该消息队列中最大的物理偏移量。
     @Deprecated
     @Override
     public long minOffset(MessageQueue mq) throws MQClientException {
@@ -882,6 +893,7 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
      * @return earliest message store time.
      * @throws MQClientException if there is any client error.
      */
+    //查找该消息队列中最小的物理偏移量。
     @Deprecated
     @Override
     public long earliestMsgStoreTime(MessageQueue mq) throws MQClientException {
@@ -900,6 +912,7 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
      * @throws RemotingException if there is any network-tier error.
      * @throws InterruptedException if the sending thread is interrupted.
      */
+    // 根据消息偏移量查找消息
     @Deprecated
     @Override
     public MessageExt viewMessage(
@@ -921,6 +934,7 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
      * @throws MQClientException if there is any client error.
      * @throws InterruptedException if the thread is interrupted.
      */
+    // 根据条件查询消息
     @Deprecated
     @Override
     public QueryResult queryMessage(String topic, String key, int maxNum, long begin, long end)
@@ -941,6 +955,7 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
      * @throws RemotingException if there is any network-tier error.
      * @throws InterruptedException if the sending thread is interrupted.
      */
+    // 根据主题与消息ID查找消息
     @Deprecated
     @Override
     public MessageExt viewMessage(String topic,
@@ -952,6 +967,7 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
         return this.defaultMQProducerImpl.queryMessageByUniqKey(withNamespace(topic), msgId);
     }
 
+    // 同步批量消息发送。
     @Override
     public SendResult send(
         Collection<Message> msgs) throws MQClientException, RemotingException, MQBrokerException, InterruptedException {

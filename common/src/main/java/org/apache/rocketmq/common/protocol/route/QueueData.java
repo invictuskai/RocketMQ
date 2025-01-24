@@ -20,6 +20,13 @@
  */
 package org.apache.rocketmq.common.protocol.route;
 
+// 队列数据，这个记录的是一个broker中某个topic的所有队列信息
+// queue有两种选择算法，分别是默认的轮询算法和最小投递延迟算法
+
+/**
+ * 最小延迟投算法
+ * 会统计每次消息投递的时间延迟，然后根据统计出的结果将消息投递到时间延迟最小的Queue。 如果延迟相同，则采用轮询算法投递。该算法可以有效提升消息的投递性能。
+ */
 public class QueueData implements Comparable<QueueData> {
 
     // broker名称

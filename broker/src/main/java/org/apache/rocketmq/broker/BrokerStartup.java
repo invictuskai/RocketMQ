@@ -46,7 +46,7 @@ import java.util.Properties;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.rocketmq.remoting.netty.TlsSystemConfig.TLS_ENABLE;
-
+// broker启动类
 public class BrokerStartup {
     public static Properties properties = null;
     public static CommandLine commandLine = null;

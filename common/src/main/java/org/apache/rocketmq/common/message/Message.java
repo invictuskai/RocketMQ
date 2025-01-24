@@ -46,6 +46,12 @@ public class Message implements Serializable {
         this(topic, "", "", 0, body, true);
     }
 
+    // topic 消息主题
+    // tag  消息tag，用于消息过滤
+    // keys 消息索引键，RocketMQ通过这些索引键快速检索消息
+    // flag 系统标识
+    // body 消息体
+    // waitStoreMsgOK 是否等待消息存储成功
     public Message(String topic, String tags, String keys, int flag, byte[] body, boolean waitStoreMsgOK) {
         this.topic = topic;
         this.flag = flag;

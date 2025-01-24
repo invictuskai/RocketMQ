@@ -110,6 +110,7 @@ public class BrokerOuterAPI {
         this.remotingClient.updateNameServerAddressList(lst);
     }
 
+    // broker向所有的nameServer发送心跳包
     public List<RegisterBrokerResult> registerBrokerAll(
         final String clusterName,
         final String brokerAddr,
@@ -123,29 +124,42 @@ public class BrokerOuterAPI {
         final boolean compressed) {
 
         final List<RegisterBrokerResult> registerBrokerResultList = new CopyOnWriteArrayList<>();
+        // 获取所有的nameServer地址
         List<String> nameServerAddressList = this.remotingClient.getNameServerAddressList();
+        // 遍历所有的nameServer地址
         if (nameServerAddressList != null && nameServerAddressList.size() > 0) {
 
+            // 构建请求头和请求体
             final RegisterBrokerRequestHeader requestHeader = new RegisterBrokerRequestHeader();
+            // broker地址
             requestHeader.setBrokerAddr(brokerAddr);
+            // brokerId=0表示主节点，brokerId>0表示从节点
             requestHeader.setBrokerId(brokerId);
+            // broker名称
             requestHeader.setBrokerName(brokerName);
+            // 集群名称。
             requestHeader.setClusterName(clusterName);
+            // 主节点地址，初次请求时该值为空，从节点向NameServer注册后返回。
             requestHeader.setHaServerAddr(haServerAddr);
             requestHeader.setCompressed(compressed);
 
             RegisterBrokerBody requestBody = new RegisterBrokerBody();
+            // topicConfigWrapper，主题配置
             requestBody.setTopicConfigSerializeWrapper(topicConfigWrapper);
             requestBody.setFilterServerList(filterServerList);
             final byte[] body = requestBody.encode(compressed);
             final int bodyCrc32 = UtilAll.crc32(body);
             requestHeader.setBodyCrc32(bodyCrc32);
+            // 创建一个CountDownLatch，数量和nameServer数量一致
             final CountDownLatch countDownLatch = new CountDownLatch(nameServerAddressList.size());
+            // 遍历所有的nameServer地址
             for (final String namesrvAddr : nameServerAddressList) {
                 brokerOuterExecutor.execute(() -> {
                     try {
+                        // 向nameServer发送心跳包
                         RegisterBrokerResult result = registerBroker(namesrvAddr, oneway, timeoutMills, requestHeader, body);
                         if (result != null) {
+                            // 将nameServer返回的结果添加到registerBrokerResultList中
                             registerBrokerResultList.add(result);
                         }
 
@@ -164,9 +178,11 @@ public class BrokerOuterAPI {
             }
         }
 
+        // 返回所有的broker心跳包发送结果
         return registerBrokerResultList;
     }
 
+    // 注册broker的信息到nameSrv
     private RegisterBrokerResult registerBroker(
         final String namesrvAddr,
         final boolean oneway,
@@ -186,11 +202,15 @@ public class BrokerOuterAPI {
             }
             return null;
         }
-
+        // 通过异步请求注册broker信息到nameSrv，并获取返回结果
         RemotingCommand response = this.remotingClient.invokeSync(namesrvAddr, request, timeoutMills);
         assert response != null;
+        // 解析获取到的response
         switch (response.getCode()) {
+            // 请求成功
             case ResponseCode.SUCCESS: {
+
+                // 解析并生成返回结果
                 RegisterBrokerResponseHeader responseHeader =
                     (RegisterBrokerResponseHeader) response.decodeCommandCustomHeader(RegisterBrokerResponseHeader.class);
                 RegisterBrokerResult result = new RegisterBrokerResult();
@@ -204,7 +224,7 @@ public class BrokerOuterAPI {
             default:
                 break;
         }
-
+        // 注册失败，抛出异常
         throw new MQBrokerException(response.getCode(), response.getRemark(), requestHeader == null ? null : requestHeader.getBrokerAddr());
     }
 

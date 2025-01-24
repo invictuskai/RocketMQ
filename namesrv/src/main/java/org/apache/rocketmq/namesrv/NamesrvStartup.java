@@ -42,6 +42,7 @@ import org.apache.rocketmq.srvutil.ShutdownHookThread;
 import org.slf4j.LoggerFactory;
 
 // NameSrv服务启动类，用户读取配置，并创建NamesrvController
+// 可以先试用 ./mqnameserver -c configFile -p命令打印当前加载的配置属性
 public class NamesrvStartup {
 
     private static InternalLogger log;

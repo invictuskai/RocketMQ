@@ -98,10 +98,10 @@ public class NamesrvController {
         //注册处理器
         this.registerProcessor();
 
-        //定时任务，任务用于检查broker存活状态，每10s检查broker状态，没有存活的broker将会移出brokerLiveTable
+        //注册定时任务，任务用于检查broker存活状态，每10s检查broker状态，没有存活的broker将会移出brokerLiveTable
         this.scheduledExecutorService.scheduleAtFixedRate(NamesrvController.this.routeInfoManager::scanNotActiveBroker, 5, 10, TimeUnit.SECONDS);
 
-        //定时任务，每10分钟输出KvConfig配置信息
+        //注册定时任务，每10分钟输出KvConfig配置信息
         this.scheduledExecutorService.scheduleAtFixedRate(NamesrvController.this.kvConfigManager::printAllPeriodically, 1, 10, TimeUnit.MINUTES);
 
         //初始化关于通信安全的文件监听模块，用来观察网络加密配置文件的更改。

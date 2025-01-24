@@ -22,6 +22,10 @@ import java.util.concurrent.locks.AbstractQueuedSynchronizer;
 
 /**
  * Add reset feature for @see java.util.concurrent.CountDownLatch
+ * 支持reset重置功能柜，可以反复被使用
+ * 和CyclicBarrier区别是
+ *  1. CyclicBarrier 是用来等待事件完成后才继续
+ *  2. CountDownLatch 是用来等待其他线程执行到某一步
  */
 public class CountDownLatch2 {
     private final Sync sync;
@@ -161,6 +165,7 @@ public class CountDownLatch2 {
     private static final class Sync extends AbstractQueuedSynchronizer {
         private static final long serialVersionUID = 4982264981922014374L;
 
+        //
         private final int startCount;
 
         Sync(int count) {
@@ -189,7 +194,7 @@ public class CountDownLatch2 {
                     return nextc == 0;
             }
         }
-
+        // 2. 添加了重置的功能函数，调用后还原到new对象的初始状态
         protected void reset() {
             setState(startCount);
         }

@@ -67,7 +67,9 @@ import org.apache.rocketmq.remoting.netty.NettyRequestProcessor;
 import org.apache.rocketmq.remoting.protocol.RemotingCommand;
 import org.apache.rocketmq.remoting.protocol.RemotingSerializable;
 
-// namesrv使用，默认请求处理器，用来接受并处理broker心跳管理
+/**
+ * nameSrv使用，默认请求处理器，用来接受并处理broker心跳管理
+ */
 public class DefaultRequestProcessor extends AsyncNettyRequestProcessor implements NettyRequestProcessor {
     private static InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.NAMESRV_LOGGER_NAME);
 
@@ -230,14 +232,14 @@ public class DefaultRequestProcessor extends AsyncNettyRequestProcessor implemen
         // 创建请求响应对象response
         final RemotingCommand response = RemotingCommand.createResponseCommand(RegisterBrokerResponseHeader.class);
 
-        //
+        // 获取响应头
         final RegisterBrokerResponseHeader responseHeader = (RegisterBrokerResponseHeader) response.readCustomHeader();
 
         // 解析请求头
         final RegisterBrokerRequestHeader requestHeader =
             (RegisterBrokerRequestHeader) request.decodeCommandCustomHeader(RegisterBrokerRequestHeader.class);
 
-        // 看收到的信息是否是client发送的信息
+        // 看收到的信息是否是client发送的信息，安全验证
         if (!checksum(ctx, request, requestHeader)) {
             response.setCode(ResponseCode.SYSTEM_ERROR);
             response.setRemark("crc32 not match");
@@ -287,7 +289,7 @@ public class DefaultRequestProcessor extends AsyncNettyRequestProcessor implemen
         if (requestHeader.getBodyCrc32() != 0) {
             // server根据body重新计算crc32值
             final int crc32 = UtilAll.crc32(request.getBody());
-            // 两次crc32值不一致，说明服务端拿到的数据和客户端发送的不一致。
+            // 两次crc32值不一致，说明服务端拿到的数据和客户端发送的不一致。数据被篡改
             if (crc32 != requestHeader.getBodyCrc32()) {
                 log.warn(String.format("receive registerBroker request,crc32 not match,from %s",
                     RemotingHelper.parseChannelRemoteAddr(ctx.channel())));
@@ -409,14 +411,17 @@ public class DefaultRequestProcessor extends AsyncNettyRequestProcessor implemen
         return response;
     }
 
+    //从NameSrv获取topic路由信息
     public RemotingCommand getRouteInfoByTopic(ChannelHandlerContext ctx,
         RemotingCommand request) throws RemotingCommandException {
+        //创建响应体
         final RemotingCommand response = RemotingCommand.createResponseCommand(null);
         final GetRouteInfoRequestHeader requestHeader =
             (GetRouteInfoRequestHeader) request.decodeCommandCustomHeader(GetRouteInfoRequestHeader.class);
-
+        // 通过RouterInfoManager中的topicQueueTable，TopicRouteData，brokerAddrTable，filterServerTable中获取对应topic的元数据信息，并创建TopicRouteData对象
         TopicRouteData topicRouteData = this.namesrvController.getRouteInfoManager().pickupTopicRouteData(requestHeader.getTopic());
 
+        // 如果找到主题对应的路由信息并且该主题为顺序消息，则从NameServer的KVConfig中获取关于顺序消息相关的配置填充路由信息。
         if (topicRouteData != null) {
             if (this.namesrvController.getNamesrvConfig().isOrderMessageEnable()) {
                 String orderTopicConf =

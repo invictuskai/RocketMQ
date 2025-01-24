@@ -17,7 +17,9 @@
 
 package org.apache.rocketmq.common.protocol;
 
-// RemotingCommand的code枚举值
+/**
+ * 在RocketMQ中，对于每一个请求定义了一个对应的RequestCode，每个RequestCode都有一个对应的处理器(processor包中)
+ */
 public class RequestCode {
 
     public static final int SEND_MESSAGE = 10;

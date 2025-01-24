@@ -112,16 +112,16 @@ import org.apache.rocketmq.store.stats.BrokerStats;
 import org.apache.rocketmq.store.stats.BrokerStatsManager;
 import org.apache.rocketmq.store.stats.LmqBrokerStatsManager;
 
-// broker控制器
-// 路由注册时通过Broker定期会与NameServer的心跳功能实现的。
-// Broker启动时候会向NameServer集群中所有的NameServer发送心跳包，每隔30s向集群中所有的NameServer发送心跳包，NameServer收到Broker心跳包以后会更新brokerAddrTable缓存中的BrokerLiveInfo的lastUpdateTimestamp，
-// NameServer会以10秒为周期进行扫描brokerLiveTble，如果连续120s都没有收到broker的心跳包，那么会将此broker处理为下线状态，移除关于下线broker的相关信息，并且关闭Socket连接。
 
 /**
+ * RocketMQ路由注册是通过Broker与NameServer的心跳功能实现的。
+ * 1,Broker启动时向集群中所有的NameServer发送心跳语句，每隔30s向集群中所有的NameServer发送心跳包，
+ * 2,NameServer收到Broker心跳包时会先更新brokerLiveTable缓存中BrokerLiveInfo的lastUpdateTimestamp，然后每隔10s扫描一次brokerLiveTable，如果连续120s没有收到心跳包，NameServer将移除该Broker的路由信息，同时关闭Socket连接。
+ *
  * 路由信息管理
  * broker下线
  * 1，定时任务通过lastUpdateTimestamp信息判断broker已经失效，会触发 destory 操作，也就是路由删除操作。
- * 2，网络交互Netty层面的，NameServer和Broker会建立长连接Channel，在此期间，如果Channel中120s没有进行 读 ｜ 写 操作的时候，同样会进行关闭socket，触发destory操作 （具体细节我们讲通信层的时候在讲）
+ * 2，网络交互Netty层面的，NameServer和Broker会建立长连接Channel，在此期间，如果Channel中120s没有进行 读｜写 操作的时候，同样会进行关闭socket，触发destory操作 （具体细节我们讲通信层的时候在讲）
  * 3，broker正常关闭，会执行 unRegisterBroker 操作
  */
 
@@ -896,12 +896,13 @@ public class BrokerController {
             this.registerBrokerAll(true, false, true);
         }
 
-        // 定时任务，发送心跳包
+        // 定时任务，每30s发送心跳包
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
 
             @Override
             public void run() {
                 try {
+                    //当前broker向所有的nameserver节点发送心跳包
                     BrokerController.this.registerBrokerAll(true, false, brokerConfig.isForceRegister());
                 } catch (Throwable e) {
                     log.error("registerBrokerAll Exception", e);

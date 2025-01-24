@@ -27,7 +27,7 @@ import org.apache.rocketmq.remoting.protocol.RemotingSerializable;
 
 public class TopicRouteData extends RemotingSerializable {
 
-    // 顺序消息配置内容，来自于kvConfig。后续顺序消息章节会讲
+    // 顺序消息配置，来自于kvConfig。后续顺序消息章节会讲
     private String orderTopicConf;
 
     // topic 队列元数据，例如 topic 数据 分布在哪些broker上
@@ -36,7 +36,7 @@ public class TopicRouteData extends RemotingSerializable {
     // topic 分布的 broker 元数据，例如 broker名称、broker地址等信息
     private List<BrokerData> brokerDatas;
 
-    // broker上过滤服务列表
+    // Broker上过滤服务器的地址列表
     private HashMap<String/* brokerAddr */, List<String>/* Filter Server */> filterServerTable;
 
     public TopicRouteData cloneTopicRouteData() {

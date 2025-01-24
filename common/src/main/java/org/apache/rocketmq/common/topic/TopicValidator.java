@@ -39,6 +39,7 @@ public class TopicValidator {
     public static final boolean[] VALID_CHAR_BIT_MAP = new boolean[128];
     private static final int TOPIC_MAX_LENGTH = 127;
 
+    // 系统topic
     private static final Set<String> SYSTEM_TOPIC_SET = new HashSet<String>();
 
     /**
