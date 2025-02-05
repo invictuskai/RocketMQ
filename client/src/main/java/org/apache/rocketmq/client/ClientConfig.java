@@ -50,7 +50,7 @@ public class ClientConfig {
     // 处理client回调的线程数量
     private int clientCallbackExecutorThreads = Runtime.getRuntime().availableProcessors();
 
-    //  namespace
+    //  namespace 命名空间
     protected String namespace;
 
     // namespace是否初始化

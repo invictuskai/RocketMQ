@@ -77,7 +77,7 @@ public class TopicPublishInfo {
         this.haveTopicRouterInfo = haveTopicRouterInfo;
     }
 
-    //选择一个当前主题下的队列发送消息
+    //选择一个当前主题下的队列发送消息，排除上一次发送失败的broker
     public MessageQueue selectOneMessageQueue(final String lastBrokerName) {
 
         // 第一次进来lastBrokerName为null，
@@ -87,7 +87,7 @@ public class TopicPublishInfo {
 
             // 走到这里，说明lastBrokerName不为空
 
-            // 遍历这个messageQueueList并选择一个brokerName不等于lastBrokerName的队列进行发送
+            // 遍历这个messageQueueList并选择一个brokerName不等于lastBrokerName的队列进行发送。上一次发送失败的broker就是lastBrokerName
             for (int i = 0; i < this.messageQueueList.size(); i++) {
                 int index = this.sendWhichQueue.incrementAndGet();
                 int pos = Math.abs(index) % this.messageQueueList.size();

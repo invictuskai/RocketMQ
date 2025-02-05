@@ -93,13 +93,13 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
     // 定时器
     private final Timer timer = new Timer("ClientHouseKeepingService", true);
 
-    // namesrv地址列表
+    // nameSrv地址列表
     private final AtomicReference<List<String>> namesrvAddrList = new AtomicReference<List<String>>();
 
-    // 已经被选择的namesrv列表
+    // 已经被选择的nameSrv列表
     private final AtomicReference<String> namesrvAddrChoosed = new AtomicReference<String>();
 
-    // namesrv索引
+    // nameSrv索引
     private final AtomicInteger namesrvIndex = new AtomicInteger(initValueIndex());
     private final Lock namesrvChannelLock = new ReentrantLock();
 
@@ -422,18 +422,31 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
         }
     }
 
-    // MQClientApiImpl调用，将业务层请求封装为网络层请求并请求NettyRemotingClient
-
-    // 参数一：服务端地址。
-    // 参数二：请求对象
-    // 参数三：超时时间
+    /**
+     *
+     /**
+     * NettyRemotingClient的方法
+     * 该方法执行同步调用。
+     * 1. 首先获取或者创建通道，即连接。
+     * 2. 然后在发送消息前后执行rpcHook钩子方法，即RPCHook#doBeforeRequest方法，
+     * 3. 通过调用invokeSyncImpl方法发起同步调用并获取响应结果返回。
+     *
+     * @param addr
+     * @param request
+     * @param timeoutMillis
+     * @return
+     * @throws InterruptedException
+     * @throws RemotingConnectException
+     * @throws RemotingSendRequestException
+     * @throws RemotingTimeoutException
+     */
     @Override
     public RemotingCommand invokeSync(String addr, final RemotingCommand request, long timeoutMillis)
         throws InterruptedException, RemotingConnectException, RemotingSendRequestException, RemotingTimeoutException {
         // 请求开始时间
         long beginStartTime = System.currentTimeMillis();
 
-        // 获取或者创建客户端与服务端Channel
+        // 根据addr建立连接，获取Channel
         final Channel channel = this.getAndCreateChannel(addr);
 
         // 条件成立，说明Channel可用
@@ -496,9 +509,18 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
         return this.createChannel(addr);
     }
 
+    /**
+     * 尝试从缓存中获取上次选择的NameServer地址
+     * 根据上次选择的NameServer地址到缓存中获取对应的Channel
+     * 如果缓存未命中则根据负载均衡算法从NameServer地址列表中选择一个NameServer地址
+     * 根据地址创建Channel并返回
+     * @return
+     * @throws RemotingConnectException
+     * @throws InterruptedException
+     */
     private Channel getAndCreateNameserverChannel() throws RemotingConnectException, InterruptedException {
 
-        //获取已经被选择的namesrv地址
+        //获取已经被选择的nameSrv地址
         String addr = this.namesrvAddrChoosed.get();
 
         // namesrv地址存在
@@ -513,14 +535,18 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
             }
         }
 
-        // 走到这里，说明没有被选择的namesrv，获取当前namesrv列表
+
+        // 执行到这里，说明可能缓存中不存在channel 或者是第一次进行连接nameserver
+
+        // 获取到我们指定的namesrv地址列表 也就是我们创建Producer或者Consumer时候指定的namesrv列表
+        // 可能存在多个，因为namesrv支持集群化部署
         final List<String> addrList = this.namesrvAddrList.get();
 
         // 获取锁
         if (this.namesrvChannelLock.tryLock(LOCK_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
             try {
 
-                // 双重检测
+                // 双重检测,防止多线程下重复创建
                 addr = this.namesrvAddrChoosed.get();
                 if (addr != null) {
                     ChannelWrapper cw = this.channelTables.get(addr);
@@ -529,7 +555,9 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
                     }
                 }
 
-                // 遍历namesrv地址列表
+                // 下面的逻辑是 负载均衡的从namesrv列表中随机获取一个namesrv尝试进行连接创建并且连接channel
+                // 并且将channel和选择的namesrv地址都缓存起来，方便下次直接获取
+
                 if (addrList != null && !addrList.isEmpty()) {
                     for (int i = 0; i < addrList.size(); i++) {
 
@@ -571,6 +599,7 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
             return cw.getChannel();
         }
 
+        // 加锁  防止并发 锁3秒
         if (this.lockChannelTables.tryLock(LOCK_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
             try {
                 boolean createNewConnection;
@@ -578,22 +607,23 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
                 //再次从Channel映射表中获取
                 cw = this.channelTables.get(addr);
                 if (cw != null) {
-
+                    // 条件成立：说明连接可用 返回连接
                     if (cw.isOK()) {
                         return cw.getChannel();
                     } else if (!cw.getChannelFuture().isDone()) {
                         createNewConnection = false;
                     } else {
+                        // 执行到这里，说明连接不可用 移除缓存 重新创建channel
                         this.channelTables.remove(addr);
                         createNewConnection = true;
                     }
                 } else {
                     createNewConnection = true;
                 }
-
+                // 条件成立：说明需要创建new连接
                 if (createNewConnection) {
 
-                    // netty层面建立和服务端的连接并获取回调结果占位符
+                    // 进行connect操作连接到对端，这里返回的是Future对象 connect操作是异步进行的，因此可能连接不一定成功，可能仍然处于连接中
                     ChannelFuture channelFuture = this.bootstrap.connect(RemotingHelper.string2SocketAddress(addr));
                     log.info("createChannel: begin to connect remote host[{}] asynchronously", addr);
 
@@ -618,7 +648,7 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
             // 获取到ChannelFuture
             ChannelFuture channelFuture = cw.getChannelFuture();
 
-            // 阻塞一定时间等待连接服务端结果，
+            // 尝试等待3秒，等待连接操作完成，
             if (channelFuture.awaitUninterruptibly(this.nettyClientConfig.getConnectTimeoutMillis())) {
 
                 // 连接服务端成功
@@ -637,26 +667,44 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
         return null;
     }
 
-    // 客户端异步请求服务端
-    // 参数一：服务端地址
-    // 参数二：客户端请求参数
-    // 参数三：超时时间
-    // 参数四：结果回调
+
+    /**
+     * MQClientInstance的方法
+     * 异步发送消息主要步骤：
+     * 1. 获取或者创建生产者与broker通道，即连接
+     * 2. 如果连接正常，在消息发送之前调用rpcHook钩子方法，即RPCHook#doBeforeRequest方法。此时要是已经超时，则直接抛出异常，就不发送消息了。
+     * 3. 最后通过调用invokeAsyncImpl方法发起异步调用。
+     * 在发送消息过程要是发生了异常，先关闭连接，然后把异常抛出。
+     * @param addr
+     * @param request
+     * @param timeoutMillis
+     * @param invokeCallback
+     * @throws InterruptedException
+     * @throws RemotingConnectException
+     * @throws RemotingTooMuchRequestException
+     * @throws RemotingTimeoutException
+     * @throws RemotingSendRequestException
+     */
     @Override
     public void invokeAsync(String addr, RemotingCommand request, long timeoutMillis, InvokeCallback invokeCallback)
         throws InterruptedException, RemotingConnectException, RemotingTooMuchRequestException, RemotingTimeoutException,
         RemotingSendRequestException {
+        // 开始时间
         long beginStartTime = System.currentTimeMillis();
+        // 获取与broker的连接
         final Channel channel = this.getAndCreateChannel(addr);
+        // 连接可用
         if (channel != null && channel.isActive()) {
             try {
 
                 // rpcHook前置扩展
                 doBeforeRpcHooks(addr, request);
+                // 如果超时则抛出异常
                 long costTime = System.currentTimeMillis() - beginStartTime;
                 if (timeoutMillis < costTime) {
                     throw new RemotingTooMuchRequestException("invokeAsync call the addr[" + addr + "] timeout");
                 }
+                // 执行异步远程调用
                 this.invokeAsyncImpl(channel, request, timeoutMillis - costTime, invokeCallback);
             } catch (RemotingSendRequestException e) {
                 log.warn("invokeAsync: send request exception, so close the channel[{}]", addr);
@@ -670,12 +718,30 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
     }
 
     // 单向请求，发送完消息之后用户线程直接返回，不等消息结果
+
+    /**
+     *
+     *  MQClientInstance的方法
+     *  单向发送消息的通方法
+     *  invokeOneway方法：只向客户端发送消息，而不处理客户端返回的消息
+     *  invokeOneway方法首先通过broker地址查找生产者与broker服务器之间的连接，如果连接不为null或者正常，在发送消息之前执行钩子，然后调用invokeOneImpl方法发送单向的消息。如果连接不正常或者发送消息失败就关闭连接。
+     * @param addr              服务器地址
+     * @param request           请求命令对象
+     * @param timeoutMillis     超时时间
+     * @throws InterruptedException
+     * @throws RemotingConnectException
+     * @throws RemotingTooMuchRequestException
+     * @throws RemotingTimeoutException
+     */
     @Override
     public void invokeOneway(String addr, RemotingCommand request, long timeoutMillis) throws InterruptedException,
         RemotingConnectException, RemotingTooMuchRequestException, RemotingTimeoutException, RemotingSendRequestException {
+        // getAndCreateChannel():先尝试从缓存中获取一个连接，如果获取不到，再根据NameServer的地址创建一个
         final Channel channel = this.getAndCreateChannel(addr);
+        //连接正常
         if (channel != null && channel.isActive()) {
             try {
+                //发送消息之前执行Rpc钩子方法doBeforeRequest
                 doBeforeRpcHooks(addr, request);
                 this.invokeOnewayImpl(channel, request, timeoutMillis);
             } catch (RemotingSendRequestException e) {
@@ -684,6 +750,7 @@ public class NettyRemotingClient extends NettyRemotingAbstract implements Remoti
                 throw e;
             }
         } else {
+            //不正常就关闭连接
             this.closeChannel(addr, channel);
             throw new RemotingConnectException(addr);
         }

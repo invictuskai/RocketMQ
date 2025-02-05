@@ -57,6 +57,8 @@ public class MQClientManager {
     public MQClientInstance getOrCreateMQClientInstance(final ClientConfig clientConfig, RPCHook rpcHook) {
 
         // 生成客户端clientId，clientId= 当前client的IP@当前client的instanceName@unitName
+        // 此处可以通过制定instanceName或者unitName来生成不同的MQClientInstance，进而对producer或者consumer单独的MQClientInstance对象
+        // 但是要注意每一个MQClientInstance对象都有自己的
         String clientId = clientConfig.buildMQClientId();
 
         // 通过client获取对于其的MQClientInstance

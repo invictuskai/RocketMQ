@@ -67,11 +67,32 @@ public class ResponseFuture {
         return diff > this.timeoutMillis;
     }
 
+    /**
+     * ResponseFuture的方法
+     * 同步等待响应结果：
+     *      CountDownLatch也被称为闭锁，它一般用来确保某些活动直到其他活动都完成才继续执行；ResponseFuture中的CountDownLatch的倒计数只有1。
+     *      那么什么时候计数变为0那？那就是调用putResponse方法的时候
+     *      该方法有两个调用点，
+     *      一个是在ChannelFutureListener中判断请求发送失败的时候，直接设置一个null进去，
+     *      另一个就是请求正常处理完毕的时候，在processResponseCommand方法中会将执行结果设置进去。
+     * @param timeoutMillis     超时时间
+     * @return
+     * @throws InterruptedException
+     */
     public RemotingCommand waitResponse(final long timeoutMillis) throws InterruptedException {
         this.countDownLatch.await(timeoutMillis, TimeUnit.MILLISECONDS);
         return this.responseCommand;
     }
-
+    /**
+     * 存入响应结果并且唤醒等待的线程
+     *
+     * 调用该方法使得ResponseFuture中的CountDownLatch的倒计数变为0；
+     * 该方法有两个调用点：
+     *      一个是在ChannelFutureListener中判断请求发送失败的时候，直接设置一个null进去；
+     *      另一个就是请求正常处理完毕的时候，在processResponseCommand方法中会将执行结果设置进去。
+     *
+     * @param responseCommand       响应结果
+     */
     public void putResponse(final RemotingCommand responseCommand) {
         this.responseCommand = responseCommand;
         this.countDownLatch.countDown();

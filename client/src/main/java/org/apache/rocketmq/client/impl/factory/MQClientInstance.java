@@ -88,6 +88,8 @@ import org.apache.rocketmq.remoting.protocol.RemotingCommand;
 /**
  * 封装了client网络层处理对象，是消费者和生产者与nameSrv以及broker进行通信的网络通道。因为无论生产者还是消费者底层都会和broker进行网络通信，
  * 网络通信处理这部分可以抽象出一个类单独进行处理同时生产者和消费者在启动之后都会注册到MQClientInstance中
+ *
+ * MQClientInstance封装了RocketMQ的网络处理API，是消息生产者、消息消费者与NameServer、Broker打交道的网络通道
  */
 public class MQClientInstance {
 
@@ -107,10 +109,10 @@ public class MQClientInstance {
     // 客户端启动时间
     private final long bootTimestamp = System.currentTimeMillis();
 
-    // 生产者映射表
+    // 生产者映射表 管理所有的producer
     private final ConcurrentMap<String/* group */, MQProducerInner> producerTable = new ConcurrentHashMap<String, MQProducerInner>();
 
-    // 消费者映射表
+    // 消费者映射表 管理所有的consumer
     private final ConcurrentMap<String/* group */, MQConsumerInner> consumerTable = new ConcurrentHashMap<String, MQConsumerInner>();
 
     // admin映射表
@@ -310,6 +312,10 @@ public class MQClientInstance {
         return mqList;
     }
 
+    /**
+     * MQClientInstance启动
+     * @throws MQClientException MQClientException
+     */
     public void start() throws MQClientException {
 
         // 并发控制
@@ -326,11 +332,11 @@ public class MQClientInstance {
                     }
                     // Start request-response channel
 
-                    // 开启 Netty 的请求响应的 Channel
+                    // 开启 Netty网络层请求处理
                     this.mQClientAPIImpl.start();
                     // Start various schedule tasks
 
-                    // 开启调度任务
+                    // 开启通过http请求获取nameSrv地址的调度任务
                     this.startScheduledTask();
 
                     // Start pull service
@@ -339,7 +345,7 @@ public class MQClientInstance {
                     this.pullMessageService.start();
                     // Start rebalance service
 
-                    // 开启再均衡服务
+                    // 开启重平衡服务
                     this.rebalanceService.start();
 
                     // Start push service
@@ -359,7 +365,7 @@ public class MQClientInstance {
     // 定时调度任务，
     private void startScheduledTask() {
 
-        // 如果没有设置namesrv，以http请求的形式获取Namesrv，120s执行一次，一般不指定这个定时任务，因为我们在启动时会设置namesrv
+        // 如果没有显式设置nameSrv，以http请求的形式获取nameSrv，120s执行一次，一般不指定这个定时任务，因为我们在启动时会设置nameSrv
         if (null == this.clientConfig.getNamesrvAddr()) {
             this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
 
@@ -439,7 +445,7 @@ public class MQClientInstance {
         return clientId;
     }
 
-    // 从namesrv获取并更新topic信息
+    // 从nameSrv获取并更新topic信息
     public void updateTopicRouteInfoFromNameServer() {
 
         // 客户端关注的topic集合

@@ -91,6 +91,7 @@ public class BrokerStartup {
 
         try {
             //PackageConflictDetect.detectFastjson();
+            // 构建命令行操作对象
             Options options = ServerUtil.buildCommandlineOptions(new Options());
             commandLine = ServerUtil.parseCmdLine("mqbroker", args, buildCommandlineOptions(options),
                 new PosixParser());
@@ -98,20 +99,34 @@ public class BrokerStartup {
                 System.exit(-1);
             }
 
+            // broker的配置类，用来封装绝大多数基本配置信息，比如ROCKETMQ_HOME
             final BrokerConfig brokerConfig = new BrokerConfig();
+            // NettyServer配置类，broker作为服务端接受来自客户端(producer/consumer)的请求
             final NettyServerConfig nettyServerConfig = new NettyServerConfig();
+            //NettyClient配置类，broker作为客户端和nameSrv交互
             final NettyClientConfig nettyClientConfig = new NettyClientConfig();
 
             nettyClientConfig.setUseTLS(Boolean.parseBoolean(System.getProperty(TLS_ENABLE,
                 String.valueOf(TlsSystemConfig.tlsMode == TlsMode.ENFORCING))));
+            // 设置netty的服务端监听端口号
             nettyServerConfig.setListenPort(10911);
+            // 存储配置类，用来封装broker的存储配置信息，比如存储路径、存储大小、存储方式等
             final MessageStoreConfig messageStoreConfig = new MessageStoreConfig();
 
+            /**
+             * Slave-broker的参数配置信息
+             * 如果broker的角色是slave(默认broker的角色是异步master)，设置命中消息在内存的最大比利
+             * 超过设置的最大内存，消息将被置换出内存。
+             */
             if (BrokerRole.SLAVE == messageStoreConfig.getBrokerRole()) {
                 int ratio = messageStoreConfig.getAccessMessageInMemoryMaxRatio() - 10;
                 messageStoreConfig.setAccessMessageInMemoryMaxRatio(ratio);
             }
 
+            /**
+             * 解析外部配置文件
+             * 判断命令行中是否包含-c字符(是否通过命令行执行配置文件)
+             */
             if (commandLine.hasOption('c')) {
                 String file = commandLine.getOptionValue('c');
                 if (file != null) {
@@ -121,9 +136,12 @@ public class BrokerStartup {
                     properties.load(in);
 
                     properties2SystemEnv(properties);
+                    // 解析broker配置信息
                     MixAll.properties2Object(properties, brokerConfig);
+                    // 设置broker的nettyServerConfig和nettyClientConfig的配置信息
                     MixAll.properties2Object(properties, nettyServerConfig);
                     MixAll.properties2Object(properties, nettyClientConfig);
+                    // 设置broker的messageStoreConfig的配置信息
                     MixAll.properties2Object(properties, messageStoreConfig);
 
                     BrokerPathConfigHelper.setBrokerConfigPath(file);
@@ -138,6 +156,7 @@ public class BrokerStartup {
                 System.exit(-2);
             }
 
+            // 获取brokerConfig中的nameSrv地址并进行校验
             String namesrvAddr = brokerConfig.getNamesrvAddr();
             if (null != namesrvAddr) {
                 try {
@@ -152,7 +171,9 @@ public class BrokerStartup {
                     System.exit(-3);
                 }
             }
-
+            /**
+             *
+             */
             switch (messageStoreConfig.getBrokerRole()) {
                 case ASYNC_MASTER:
                 case SYNC_MASTER:

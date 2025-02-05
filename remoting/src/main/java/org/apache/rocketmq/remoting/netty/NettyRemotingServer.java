@@ -64,7 +64,7 @@ import org.apache.rocketmq.remoting.exception.RemotingTimeoutException;
 import org.apache.rocketmq.remoting.exception.RemotingTooMuchRequestException;
 import org.apache.rocketmq.remoting.protocol.RemotingCommand;
 
-// 服务端网络连接层，主要用在broker和namesrv通信过程中，namesrv通过NettyRemotingServer来充当网络服务器角色处理broker的请求
+// 服务端网络连接层，主要用在broker和nameSrv通信过程中，namesrv通过NettyRemotingServer来充当网络服务器角色处理broker的请求
 public class NettyRemotingServer extends NettyRemotingAbstract implements RemotingServer {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(RemotingHelper.ROCKETMQ_REMOTING);
 

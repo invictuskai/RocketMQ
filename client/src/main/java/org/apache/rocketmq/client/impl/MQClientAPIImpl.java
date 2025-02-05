@@ -170,7 +170,7 @@ import org.apache.rocketmq.remoting.protocol.LanguageCode;
 import org.apache.rocketmq.remoting.protocol.RemotingCommand;
 import org.apache.rocketmq.remoting.protocol.RemotingSerializable;
 
-// 将业务请求参数封装为RemotingCommand对象，同时通过MQClientAPIImpl与namesrv和broker保持通讯，
+// 将业务请求参数封装为RemotingCommand对象，同时通过MQClientAPIImpl与nameSrv和broker保持通讯，
 public class MQClientAPIImpl {
 
     private final static InternalLogger log = ClientLogger.getLog();
@@ -243,7 +243,7 @@ public class MQClientAPIImpl {
         return remotingClient;
     }
 
-    // 调用http接口去寻址，需配置hosts信息，客户端默认每隔两分钟去访问一次这个http地址，并更新本地namesrvAddr地址。
+    // 调用http接口去获取NameSrv地址，需配置hosts信息，客户端默认每隔两分钟去访问一次这个http地址，并更新本地nameSrvAddr地址。
     public String fetchNameServerAddr() {
         try {
             String addrs = this.topAddressing.fetchNSAddr();
@@ -459,15 +459,27 @@ public class MQClientAPIImpl {
         return sendMessage(addr, brokerName, msg, requestHeader, timeoutMillis, communicationMode, null, null, null, 0, context, producer);
     }
 
-    // 参数一：broker地址
-    // 参数二：brokerName
-    // 参数三：msg
-    // 参数四：SendMessageRequestHeader
-    // 参数五：超时时间
-    // 参数六：消息发送方式
-    // 参数七：sendCallback
-    // 参数八：主题发布数据
-    // 参数九：
+
+    /**
+     * MQClientInstance的方法
+     * 单向、同步、异步消息的最终发送消息的方法
+     * @param addr                          broker地址
+     * @param brokerName                    brokerName
+     * @param msg                           msg
+     * @param requestHeader                 requestHeader
+     * @param timeoutMillis                 剩余超发时间
+     * @param communicationMode             发送模式
+     * @param sendCallback                  发送回调函数
+     * @param topicPublishInfo              topic信息
+     * @param instance                      MQClientInstance
+     * @param retryTimesWhenSendFailed      异步发送失败时的重试次数，默认2次
+     * @param context                       发送消息上下文
+     * @param producer                      DefaultMQProducerImpl
+     * @return
+     * @throws RemotingException
+     * @throws MQBrokerException
+     * @throws InterruptedException
+     */
     public SendResult sendMessage(
         final String addr,
         final String brokerName,
@@ -492,23 +504,28 @@ public class MQClientAPIImpl {
         // 获取消息类型
         String msgType = msg.getProperty(MessageConst.PROPERTY_MESSAGE_TYPE);
 
-        // 是否为回执消息，
+        // 是否为重试消息
         boolean isReply = msgType != null && msgType.equals(MixAll.REPLY_MESSAGE_FLAG);
         if (isReply) {
             if (sendSmartMsg) {
+                // 构建轻量级消息头
                 SendMessageRequestHeaderV2 requestHeaderV2 = SendMessageRequestHeaderV2.createSendMessageRequestHeaderV2(requestHeader);
+
+                //创建发送消息命令对象，RequestCode为SEND_REPLY_MESSAGE_V2
                 request = RemotingCommand.createRequestCommand(RequestCode.SEND_REPLY_MESSAGE_V2, requestHeaderV2);
             } else {
+                // 创建发送消息命令对象，RequestCode为SEND_REPLY_MESSAGE
                 request = RemotingCommand.createRequestCommand(RequestCode.SEND_REPLY_MESSAGE, requestHeader);
             }
         } else {
-            // 通常情况走到这里
+            // 通常情况走到这里，批量消息或者sendSmartMsg=true(sendSmartMsg默认尾true)
             if (sendSmartMsg || msg instanceof MessageBatch) {
-                // 将SendMessageRequestHeader转换为SendMessageRequestHeaderV2
+                // 将SendMessageRequestHeader转换为SendMessageRequestHeaderV2, 构建轻量级消息头，SendMessageRequestHeaderV2中field都是a,b,c,d等短变量，可以加快反序列化过程。
                 SendMessageRequestHeaderV2 requestHeaderV2 = SendMessageRequestHeaderV2.createSendMessageRequestHeaderV2(requestHeader);
-                // 创建网络协议传输对象
+                //如果是批量消息，则RequestCode为SEND_BATCH_MESSAGE，否则为SEND_MESSAGE_V2
                 request = RemotingCommand.createRequestCommand(msg instanceof MessageBatch ? RequestCode.SEND_BATCH_MESSAGE : RequestCode.SEND_MESSAGE_V2, requestHeaderV2);
             } else {
+                // 创建发送消息命令对象，RequestCode为SEND_REPLY_MESSAGE
                 request = RemotingCommand.createRequestCommand(RequestCode.SEND_MESSAGE, requestHeader);
             }
         }
@@ -518,11 +535,17 @@ public class MQClientAPIImpl {
 
         // 根据发送方式调用不同的方法，最终进入NettingRemotingClient将消息发送给broker，由broker完成存储并返回
         switch (communicationMode) {
+            // 如果是单向消息调用该方法之后不接收返回值，直接返回null(不保证可靠投递)
             case ONEWAY:
                 this.remotingClient.invokeOneway(addr, request, timeoutMillis);
                 return null;
+            // 异步发送，调用该方法后不在接收返回值，直接返回null
             case ASYNC:
+
+                //异步消息重试计数器
                 final AtomicInteger times = new AtomicInteger();
+
+                //计算是否超时，如果超时则不再发送
                 long costTimeAsync = System.currentTimeMillis() - beginStartTime;
                 if (timeoutMillis < costTimeAsync) {
                     throw new RemotingTooMuchRequestException("sendMessage call timeout");
@@ -530,11 +553,14 @@ public class MQClientAPIImpl {
                 this.sendMessageAsync(addr, brokerName, msg, timeoutMillis - costTimeAsync, request, sendCallback, topicPublishInfo, instance,
                     retryTimesWhenSendFailed, times, context, producer);
                 return null;
+            // 同步发送，调用该方法之后阻塞直至收回返回值
             case SYNC:
+                //计算是否超时，如果超时则不再发送
                 long costTimeSync = System.currentTimeMillis() - beginStartTime;
                 if (timeoutMillis < costTimeSync) {
                     throw new RemotingTooMuchRequestException("sendMessage call timeout");
                 }
+                // 执行同步发送
                 return this.sendMessageSync(addr, brokerName, msg, timeoutMillis - costTimeSync, request);
             default:
                 assert false;
@@ -559,6 +585,33 @@ public class MQClientAPIImpl {
         return this.processSendResponse(brokerName, msg, response, addr);
     }
 
+    /**
+     * 异步发送是指消息生产者调用发送的API后，无须等待消息服务器
+     * 返回本次消息发送的结果，只需要提供一个回调函数，供消息发送客
+     * 户端在收到响应结果后回调。异步发送方式相比于同步发送方式，虽
+     * 然消息发送端的发送性能会显著提高，但是为了降低消息服务器的负
+     * 载压力，RocketMQ对消息发送的异步消息进行了并发控制，
+     * MQClientInstance的方法
+     * 异步发送的主要调用逻辑：
+     *      调用invokeAsync方法发送异步消息 ，将响应结果交给InvokeCallback类进行回调处理。
+     *      为了避免消息异步发送失败，将消息保存在容器表中，供重试发送，当消息发送出现异常时，调用onExceptionImpl方法处理异常，实际上onExceptionImpl方法也是将消息重试发送，直到消息被成功发送。
+     *
+     * 发送消息是通过异步的方式发送，然后进行等待消息的响应结果，那么这里是如何进行等待的那？
+     *      利用countDownLath.await()方法等待，达到阻塞的目的，当超时就返回响应。
+     *      响应返回之后，就需要对响应进行处理。大致逻辑就是根据响应的状态码，设置发送的结果状态，设置发送结果，最后将发送结果返回。
+     * @param addr
+     * @param brokerName
+     * @param msg
+     * @param timeoutMillis
+     * @param request
+     * @param sendCallback
+     * @param topicPublishInfo
+     * @param instance
+     * @param retryTimesWhenSendFailed      异步胸袭发送失败重试次数
+     * @param times                         重试计数器
+     * @param context
+     * @param producer
+     */
     private void sendMessageAsync(
         final String addr,
         final String brokerName,
@@ -573,16 +626,26 @@ public class MQClientAPIImpl {
         final SendMessageContext context,
         final DefaultMQProducerImpl producer
     ) {
+        // 开始时间
         final long beginStartTime = System.currentTimeMillis();
         try {
+            /**
+             * 发送异步消息，设置一个InvokeCallback回调对象
+             *
+             * InvokeCallback#operationComplete方法将会在得到结果之后进行回调
+             */
             this.remotingClient.invokeAsync(addr, request, timeoutMillis, new InvokeCallback() {
+
+                // 异步执行的回调方法
                 @Override
                 public void operationComplete(ResponseFuture responseFuture) {
                     long cost = System.currentTimeMillis() - beginStartTime;
                     RemotingCommand response = responseFuture.getResponseCommand();
+                    //如果没有设置回调函数
                     if (null == sendCallback && response != null) {
 
                         try {
+                            //调用processSendResponse方法处理响应结果
                             SendResult sendResult = MQClientAPIImpl.this.processSendResponse(brokerName, msg, response, addr);
                             if (context != null && sendResult != null) {
                                 context.setSendResult(sendResult);
@@ -590,32 +653,38 @@ public class MQClientAPIImpl {
                             }
                         } catch (Throwable e) {
                         }
-
+                        //放入容错表中，更新本地错误表缓存数据，用于延迟时间的故障转移的功能
                         producer.updateFaultItem(brokerName, System.currentTimeMillis() - responseFuture.getBeginTimestamp(), false);
                         return;
                     }
-
+                    //如果存在响应结果
                     if (response != null) {
                         try {
+                            //调用processSendResponse方法处理响应,得到消息发送结果SendResult
                             SendResult sendResult = MQClientAPIImpl.this.processSendResponse(brokerName, msg, response, addr);
                             assert sendResult != null;
                             if (context != null) {
+                                //执行消息发送之前的钩子函数，即SendMessageHook#sendMessageAfter方法
                                 context.setSendResult(sendResult);
                                 context.getProducer().executeSendMessageHookAfter(context);
                             }
 
                             try {
+                                //响应成功时调用，执行sendCallback的onSuccess方法
+                                //这里的的sendCallback就是发送消息时候传入的回调函数
                                 sendCallback.onSuccess(sendResult);
                             } catch (Throwable e) {
                             }
-
+                            //放入容错表中，更新本地错误表缓存数据，用于延迟时间的故障转移的功能
                             producer.updateFaultItem(brokerName, System.currentTimeMillis() - responseFuture.getBeginTimestamp(), false);
                         } catch (Exception e) {
+                            //放入容错表中，更新本地错误表缓存数据，用于延迟时间的故障转移的功能
                             producer.updateFaultItem(brokerName, System.currentTimeMillis() - responseFuture.getBeginTimestamp(), true);
                             onExceptionImpl(brokerName, msg, timeoutMillis - cost, request, sendCallback, topicPublishInfo, instance,
                                 retryTimesWhenSendFailed, times, e, context, false, producer);
                         }
                     } else {
+                        //放入容错表中，更新本地错误表缓存数据，用于延迟时间的故障转移的功能
                         producer.updateFaultItem(brokerName, System.currentTimeMillis() - responseFuture.getBeginTimestamp(), true);
                         if (!responseFuture.isSendRequestOK()) {
                             MQClientException ex = new MQClientException("send request failed", responseFuture.getCause());
@@ -642,6 +711,26 @@ public class MQClientAPIImpl {
         }
     }
 
+    /**
+     * MQClientAPIImpl
+     * 异步发送消息的异常处理的方法，包含重试的逻辑：
+     *        所谓的重试实际上就是重复的调用sendMessageAsync方法。
+     *        重试之前，首先会判断本次重试的次数是否大于重试总次数，参数为retryTimesWhenSendFailed，默认2次。
+     *        如果超过了最大重试次数，那么便不会重试，而是执行sendCallback#onException方法。
+     * @param brokerName
+     * @param msg
+     * @param timeoutMillis
+     * @param request
+     * @param sendCallback
+     * @param topicPublishInfo
+     * @param instance
+     * @param timesTotal            异步发送失败重试次数
+     * @param curTimes              重试计数器
+     * @param e                     抛出的异常
+     * @param context
+     * @param needRetry             是否需要重试
+     * @param producer
+     */
     private void onExceptionImpl(final String brokerName,
         final Message msg,
         final long timeoutMillis,
@@ -656,33 +745,50 @@ public class MQClientAPIImpl {
         final boolean needRetry,
         final DefaultMQProducerImpl producer
     ) {
+        //重试次数加1并获取
         int tmp = curTimes.incrementAndGet();
+        // 如果需要重试，并且本次重试次数小于等于总次数
         if (needRetry && tmp <= timesTotal) {
+            //保存brokerName， 异步重试将会发送到相同的broker
             String retryBrokerName = brokerName;//by default, it will send to the same broker
             if (topicPublishInfo != null) { //select one message queue accordingly, in order to determine which broker to send
+                //重新选择一个消息队列
                 MessageQueue mqChosen = producer.selectOneMessageQueue(topicPublishInfo, brokerName);
                 retryBrokerName = mqChosen.getBrokerName();
             }
             String addr = instance.findBrokerAddressInPublish(retryBrokerName);
             log.warn("async send msg by retry {} times. topic={}, brokerAddr={}, brokerName={}", tmp, msg.getTopic(), addr,
                     retryBrokerName, e);
+            //设置请求id，通过id可以获取请求结果
             request.setOpaque(RemotingCommand.createNewRequestId());
+            //调用sendMessageAsync再次发送异步消息
             sendMessageAsync(addr, retryBrokerName, msg, timeoutMillis, request, sendCallback, topicPublishInfo, instance,
                     timesTotal, curTimes, context, producer);
         } else {
-
+            //如果本次重试次数大于总次数
             if (context != null) {
                 context.setException(e);
                 context.getProducer().executeSendMessageHookAfter(context);
             }
 
             try {
+                //最后执行sendCallback的onException方法
                 sendCallback.onException(e);
             } catch (Exception ignored) {
             }
         }
     }
 
+    /**
+     * 获得响应之后，调用processSendResponse方法处理响应结果，主要就是进行响应码的对应封装操作，然后对发送正常和异常情况分别进行不同的处理并返回sendResult对象。
+     * @param brokerName
+     * @param msg
+     * @param response
+     * @param addr
+     * @return
+     * @throws MQBrokerException
+     * @throws RemotingCommandException
+     */
     private SendResult processSendResponse(
         final String brokerName,
         final Message msg,
@@ -713,6 +819,7 @@ public class MQClientAPIImpl {
             }
         }
 
+        //获取响应头
         SendMessageResponseHeader responseHeader =
             (SendMessageResponseHeader) response.decodeCommandCustomHeader(SendMessageResponseHeader.class);
 
@@ -722,8 +829,9 @@ public class MQClientAPIImpl {
             topic = NamespaceUtil.withoutNamespace(topic, this.clientConfig.getNamespace());
         }
 
+        //新建一个MessageQueue，设置属性
         MessageQueue messageQueue = new MessageQueue(topic, brokerName, responseHeader.getQueueId());
-
+        //获取客户端生成的uniqId
         String uniqMsgId = MessageClientIDSetter.getUniqID(msg);
         if (msg instanceof MessageBatch) {
             StringBuilder sb = new StringBuilder();
@@ -732,9 +840,11 @@ public class MQClientAPIImpl {
             }
             uniqMsgId = sb.toString();
         }
+        //新建SendResult对象，即最终返回的对象，设置客户端生成的uniqMsgId为为msgId属性，设置broker生成的MsgId为offsetMsgId属性
         SendResult sendResult = new SendResult(sendStatus,
             uniqMsgId,
             responseHeader.getMsgId(), messageQueue, responseHeader.getQueueOffset());
+        //设置事务id
         sendResult.setTransactionId(responseHeader.getTransactionId());
         String regionId = response.getExtFields().get(MessageConst.PROPERTY_MSG_REGION);
         String traceOn = response.getExtFields().get(MessageConst.PROPERTY_TRACE_SWITCH);
