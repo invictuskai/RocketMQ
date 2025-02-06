@@ -81,7 +81,7 @@ public class RemotingCommand {
         }
     }
 
-    //行为编码 比如code=201表示发送消息
+    //请求命令编码，请求命令类型 比如code=201表示发送消息 请求命令编码，请求命令类型
     private int code;
 
     // 通信双方使用的语言类型，默认为java
@@ -93,16 +93,16 @@ public class RemotingCommand {
     //请求id，请求和响应相同，每次自增+1
     private int opaque = requestId.getAndIncrement();
 
-    //标记字段
+    //标记字段 倒数第一位表示请求类型，0表示请求；1表示返回。倒数第二位，1表示单向发送。
     private int flag = 0;
 
     // 请求的自定义文本信息或者响应的错误描述信息
     private String remark;
 
-    // 自定义字段，通过反射将字段名和值放入extFields
+    //扩展字段，通过反射将字段名和值放入extFields
     private HashMap<String, String> extFields;
 
-    // 自定义header
+    //每个请求对应的请求头信息
     private transient CommandCustomHeader customHeader;
 
     // 序列化类型

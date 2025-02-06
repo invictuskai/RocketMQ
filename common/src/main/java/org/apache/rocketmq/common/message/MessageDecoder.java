@@ -33,6 +33,9 @@ import org.apache.rocketmq.common.compression.Compressor;
 import org.apache.rocketmq.common.compression.CompressorFactory;
 import org.apache.rocketmq.common.sysflag.MessageSysFlag;
 
+/**
+ * 创建或者解码MessageId
+ */
 public class MessageDecoder {
 //    public final static int MSG_ID_LENGTH = 8 + 8;
 
@@ -471,6 +474,11 @@ public class MessageDecoder {
         return map;
     }
 
+    /**
+     * 调用messageBatch#encode方法填充到Remoting Command的body域中
+     * @param message
+     * @return
+     */
     public static byte[] encodeMessage(Message message) {
         //only need flag, body, properties
         byte[] body = message.getBody();

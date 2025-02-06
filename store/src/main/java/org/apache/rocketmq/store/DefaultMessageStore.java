@@ -71,6 +71,11 @@ import org.apache.rocketmq.store.index.QueryOffsetResult;
 import org.apache.rocketmq.store.schedule.ScheduleMessageService;
 import org.apache.rocketmq.store.stats.BrokerStatsManager;
 
+/**
+ * 消息存储对象defaultMessageStore
+ * 是RocketMQ的核心文件存储控制类，是RocketMQ对于消息存储和获取功能的抽象，DefaultMessageStore类位于store模块，
+ * 通过该类可以直接控制管理commitLog、consumeQueue、indexFile等文件内容的读、写，非常重要。
+ */
 public class DefaultMessageStore implements MessageStore {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.STORE_LOGGER_NAME);
 
@@ -130,32 +135,49 @@ public class DefaultMessageStore implements MessageStore {
 
     public DefaultMessageStore(final MessageStoreConfig messageStoreConfig, final BrokerStatsManager brokerStatsManager,
         final MessageArrivingListener messageArrivingListener, final BrokerConfig brokerConfig) throws IOException {
+        // 消息送达的监听器，生产者消息到达时通过该监听器出发pullRequestHoldService
         this.messageArrivingListener = messageArrivingListener;
+        // broker配置类，包含broker的各种配置
         this.brokerConfig = brokerConfig;
+        // broker消息存储配置
         this.messageStoreConfig = messageStoreConfig;
+        // broker状态管理器 保存broker运行时状态，统计工作
         this.brokerStatsManager = brokerStatsManager;
+        // 创建MappedFile文件服务，用于初始化MappedFile和预热MappedFile
         this.allocateMappedFileService = new AllocateMappedFileService(this);
+
+        //实例化commitLog，enableDLegerCommitLog表示支持自动主从切换功能，默认是false
+        //默认是commitLog
         if (messageStoreConfig.isEnableDLegerCommitLog()) {
             this.commitLog = new DLedgerCommitLog(this);
         } else {
             this.commitLog = new CommitLog(this);
         }
+
         this.consumeQueueTable = new ConcurrentHashMap<>(32);
 
+        // consumeQueue文件的刷盘服务
         this.flushConsumeQueueService = new FlushConsumeQueueService();
+        // 清理过期的commitLog服务
         this.cleanCommitLogService = new CleanCommitLogService();
+        // 清理过期的consumeQueue服务
         this.cleanConsumeQueueService = new CleanConsumeQueueService();
+        // 存储一些统计指标信息服务
         this.storeStatsService = new StoreStatsService();
+        // 索引文件服务
         this.indexService = new IndexService(this);
         if (!messageStoreConfig.isEnableDLegerCommitLog()) {
             this.haService = new HAService(this);
         } else {
             this.haService = null;
         }
+        // 根据commitLog文件，更新index索引文件和consumeQueue文件偏移量
         this.reputMessageService = new ReputMessageService();
 
+        // 处理RocketMQ的延迟消息服务
         this.scheduleMessageService = new ScheduleMessageService(this);
 
+        // 初始化MappedFile时进行ByteBuffer的分配回收
         this.transientStorePool = new TransientStorePool(messageStoreConfig);
 
         if (messageStoreConfig.isTransientStorePoolEnable()) {
@@ -166,14 +188,22 @@ public class DefaultMessageStore implements MessageStore {
 
         this.indexService.start();
 
+        // 转发服务列表，监听commitLog文件中的新消息存储，然后会调用列表中的commitLOgDispatcher的dispatch方法
         this.dispatcherList = new LinkedList<>();
+        // 通知ConsumeQueue的dispatcher服务，可用于更新consumeQueue的偏移量等信息
         this.dispatcherList.addLast(new CommitLogDispatcherBuildConsumeQueue());
+        // 通知IndexFile的dispatcher服务，可用于更新indexFile的时间戳等信息
         this.dispatcherList.addLast(new CommitLogDispatcherBuildIndex());
-
+        // 获取文件锁
         File file = new File(StorePathConfigHelper.getLockFile(messageStoreConfig.getStorePathRootDir()));
+        // 确保创建file文件的父目录
         MappedFile.ensureDirOK(file.getParent());
+        // 确保创建commitLog目录
         MappedFile.ensureDirOK(getStorePathPhysic());
+        // 确保创建consumeQueue目录
         MappedFile.ensureDirOK(getStorePathLogic());
+        // 超级lockFile文件，名为lock，权限是读写，这是一个锁文件用于获取文件锁
+        // 文件锁用来保证磁盘上的这些存储文件同时只有一个broker的messageStore来操作
         lockFile = new RandomAccessFile(file, "rw");
     }
 
@@ -188,27 +218,50 @@ public class DefaultMessageStore implements MessageStore {
     }
 
     /**
-     * @throws IOException
+     * 将会调用load方法将磁盘中的commitLog、ConsumeQueue、IndexFile文件的数据加载到内存，还会进行数据恢复操作。
      */
     public boolean load() {
         boolean result = true;
 
         try {
+            // 判断上次broker是否是正常退出,如果是正常退出不会保留absort文件，异常退出则会；broker在启动时会创建abort文件，并且注册钩子函数，在JVM退出时删除abort文件，
+            // 如果下一次启动时存在abort文件，说明broker是异常退出的，文件数据可能存在不一致的情况，需要进行数据修复
             boolean lastExitOK = !this.isTempFileExist();
             log.info("last shutdown {}", lastExitOK ? "normally" : "abnormally");
 
             // load Commit Log
+            /**
+             * 加载CommitLog日志文件。CommitLog文件才是真正消息存储的地方（即消息主题以及元数据的存储主题，存储Producer端写入的消息主题内容，消息内容是不定长的）。
+             * 单个大小默认1G。官方描述如下：单个文件大小默认1G，文件名长度为20位，左边补零，剩余为起始偏移量，比如00000000000000000000代表了第一个文件，起始偏移量为0，
+             * 文件大小为1G=1073741824；当第一个文件写满了，第二个文件为00000000001073741824，起始偏移量为1073741824，以此类推。消息顺序写入日志文件，效率很高，当文件满了，写入下一个文件。
+             */
             result = result && this.commitLog.load();
 
             // load Consume Queue
+            /**
+             * 加载ConusmeQueue文件。 ConsumeQueue文件可以看作是CommitLog是索引文件，其存储了它所属topic的信息在CommitLog中的偏移量。
+             * 消费者拉取消息的时候，可以从ConsumeQueue中快速的根据偏移量定位消息在CommitLog中的位置。
+             */
             result = result && this.loadConsumeQueue();
 
             if (result) {
+                /**
+                 * 加载checkpoint检查点文件。StoreCheckpoint记录这commitLog、ConsumeQueue、Index文件的最后更新时间点。
+                 * 当上一次broker是异常结束时，会根据StoreCheckpoint的数据进行恢复，这决定着文件从哪里开始恢复，甚至是删除文件。
+                 */
                 this.storeCheckpoint =
                     new StoreCheckpoint(StorePathConfigHelper.getStoreCheckpoint(this.messageStoreConfig.getStorePathRootDir()));
 
+                /**
+                 * index 索引文件用于通过时间区间来快速查询消息，底层为HashMap结构，实现为hash索引。
+                 * 最终一个index文件对应着一个IndexFile实例，并且会加到indexFileList集合中。还会判断如果上次broker不是正常退出，
+                 * 并且并且当前index文件中最后一个消息的落盘时间戳大于StoreCheckpoint中的最后一个index索引文件创建时间，则该索引文件被删除。
+                 */
                 this.indexService.load(lastExitOK);
 
+                /**
+                 * 恢复CommitLog文件以及consumeQueueTable，将正确的数据恢复至内存，删除错误数据和文件
+                 */
                 this.recover(lastExitOK);
 
                 log.info("load over, and the max phy offset = {}", this.getMaxPhyOffset());
@@ -1378,18 +1431,37 @@ public class DefaultMessageStore implements MessageStore {
         }
     }
 
+    /**
+     * 判断是否存在临时文件
+     * @return boolean
+     */
     private boolean isTempFileExist() {
+        /**
+         * 获取临时文件路径 路径为 {storePathRootDir}/abort.
+         */
         String fileName = StorePathConfigHelper.getAbortFile(this.messageStoreConfig.getStorePathRootDir());
+        // 构建file文件对象并判断文件是否存在
         File file = new File(fileName);
         return file.exists();
     }
 
+    /**
+     * 该方法用于加载消费队列文件，ConsumeQueue文件可以看作是CommitLog的索引文件，其存储了它所属topic的消息在CommitLog中的偏移量。
+     * 消费者拉取消息时，可以从ConsumeQueue中快速的根据偏移量定位消息在CommitLog中位置
+     *
+     * 一个队列id目录对应着一个ConsumeQueue对象，其内部保存着一个mappedFileQueue对象，其表示当前队列id目录下面的ConsumeQueue文件集合，同样一个ConsumeQueue文件被映射为一个Mappedfile对象
+     * 随后ConsumeQueue以及topic和queueId的对应关系被存入DefaultMessageStore的consumeQueueTable属性集合中
+     * @return boolean
+     */
     private boolean loadConsumeQueue() {
+        //获取ConsumeQueue文件所在目录，目录路径为storePathRootDir/consumequeue
         File dirLogic = new File(StorePathConfigHelper.getStorePathConsumeQueue(this.messageStoreConfig.getStorePathRootDir()));
+        //获取目录下文件列表，实际上是topic目录列表
         File[] fileTopicList = dirLogic.listFiles();
         if (fileTopicList != null) {
-
+            //遍历topic目录
             for (File fileTopic : fileTopicList) {
+                //获取topic目录下面的队列id目录
                 String topic = fileTopic.getName();
 
                 File[] fileQueueIdList = fileTopic.listFiles();
@@ -1397,10 +1469,18 @@ public class DefaultMessageStore implements MessageStore {
                     for (File fileQueueId : fileQueueIdList) {
                         int queueId;
                         try {
+                            //获取队列id
                             queueId = Integer.parseInt(fileQueueId.getName());
                         } catch (NumberFormatException e) {
                             continue;
                         }
+                        /**
+                         * 创建ConsumeQueue对象，一个队列id目录对应着一个ConsumeQueue对象
+                         * consumeQueue文件可以看成是基于topic的commitLog索引文件，故consumeQueue文件夹的组织方式如下：topic/queue/file三层组织结构
+                         * consumeQueue文件中的条目采取定长设计，每个条目一共20个字节，
+                         * 分别是：8个字节的commitLog物理偏移量，4个字节的消息长度，8个字节的tag hashcode，单个文件由30w条目录组成，
+                         * 可以像数组一样随机访问每一条目录，每个ConsumeQueue文件大小约5.72M
+                         */
                         ConsumeQueue logic = new ConsumeQueue(
                             topic,
                             queueId,
@@ -1408,6 +1488,10 @@ public class DefaultMessageStore implements MessageStore {
                             this.getMessageStoreConfig().getMappedFileSizeConsumeQueue(),
                             this);
                         this.putConsumeQueue(topic, queueId, logic);
+                        /**
+                         * ConsumeQueue对象建立之后，会对自己管理的队列id目录下面的ConsumeQueue文件进行加载。内部就是调用mappedFileQueue的load方法，该方法我们前面讲过了，
+                         * 会对每个ConsumeQueue文件创建一个MappedFile对象并且进行内存映射mmap操作。
+                         */
                         if (!logic.load()) {
                             return false;
                         }
@@ -1420,16 +1504,48 @@ public class DefaultMessageStore implements MessageStore {
 
         return true;
     }
-
+    /**
+     * recover: 恢复ConsumeQueue文件和commitLog文件，将正确的数据恢复至内存，删除错误数据和文件
+     * @param lastExitOK 上次是否正常退出
+     */
     private void recover(final boolean lastExitOK) {
+
+        /**
+         * 恢复所有的ConsumeQueue文件
+         * 1. 恢复规则：
+         *      RocketMQ不会也没有必要对所有的ConsumeQueue文件进行恢复校验，如果ConsumeQueue文件数量大于等于3个，那么就取最新的3个
+         *      ConsumeQueue文件执行恢复，否则对全部的ConsumeQueue文件进行恢复
+         * 2. 所谓的恢复：就是找出当前queueId的ConsumeQueue下的所有ConsumeQueue文件中最大的有效的commitlog消息日志文件的物理偏移量，以及该索引文件自身的最大有效数据偏移量
+         *      随后对文件自身的最大有效数据偏移量processOffset之后的所有文件和数据进行更新或者删除
+         * 3. 如何判断ConsumeQueue索引文件中的一个索引条目是有效的那？ 或是说是有效数据那？
+         *      只要该条目保存的对应的消息在commitlog文件中的物理偏移量和该条目保存的对应的信息在commitlog文件中的总长度大于0则表示当前条目有效，否则表示该条目无效，并且不会对后续的条目和文件进行恢复
+         * 4. 最大的有效的commitlog消息物理偏移量，就是指的最后一个有效条目中保存的commitlog文件中的物理偏移量。
+         *      而文件自身的最大有效数据偏移量
+         */
+        // 获得ConsumeQueue存储的最大有效commitlog偏移量
         long maxPhyOffsetOfConsumeQueue = this.recoverConsumeQueue();
 
         if (lastExitOK) {
+            /**
+             * 正常恢复commitlog
+             */
             this.commitLog.recoverNormally(maxPhyOffsetOfConsumeQueue);
         } else {
+            /**
+             * 异常恢复commitlog：该方法用于broker上次异常关闭的时候恢复commitlog，其逻辑与commitlog文件的正常恢复方法recoverNormally有些许区别，但是中心的核心逻辑都是一样的。
+             * 对于异常恢复的commitlog，不再是最多取后三个文件恢复，而是倒序遍历所有的commitlog文件执行校验和恢复的操作，直到找到第一个消息正常存储的commitlog文件，
+             * 为什么这么做那？因为异常恢复不能确定最后的刷盘点在哪个文件里，只能遍历查找。
+             *
+             * 1. 首先倒序遍历并通过调用isMappedFileMatchedRecover方法判断当前文件是否是一个正常的commitlog文件。
+             *    包括：文件魔术的校验，文件消息存盘时间校验，StoreCheckpoint校验等。如果找到一个正确的commitlog文件，则停止遍历。
+             * 2. 然后从第一个正确的commitlog文件开始向后遍历，恢复commitlog。
+             * 如果某个消息是正常的，那么通过defaultMessageStore.doDispatch方法调用CommitLogDispatch重新构建当前消息的indexfile索引和consumequeue索引。
+             * 3. 恢复完毕之后的代码和commitlog文件正常恢复的流程是一样的。
+             * 例如：删除文件最大有效数据偏移量processOffset之后的所有commitlog数据，清除consumequeue文件中的脏数据等等。
+             */
             this.commitLog.recoverAbnormally(maxPhyOffsetOfConsumeQueue);
         }
-
+        // 最后恢复topicQueueTable
         this.recoverTopicQueueTable();
     }
 

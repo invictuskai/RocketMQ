@@ -118,6 +118,20 @@ public class MixAll {
         return DLQ_GROUP_TOPIC_PREFIX + consumerGroup;
     }
 
+    /**
+     * MixAll的方法
+     * tips：
+     *      1. 消费者拉取消息只能请求普通通道，但是生产者发送消息可以选择vip通道或者普通通道
+     *      2. 为什么要开启两个端口监听客户端请求呢？
+     *          答案：是隔离读写操作。在消息的API中，最重要的是发送消息，需要高的RTT。
+     *               如果是普通端口请求繁忙，会使得netty的IO线程阻塞，例如消息堆积的时候，消费消息的请求会填满IO线程池，导致写操作被阻塞。
+     *               在这种情况下，我们可以想VIP通道发送消息，以保证发送消息的RTT。
+     *      注意：在RocketMQ4.5.1版本之后，客户端发送消息的请求选择VIP通道的配置被改为false，想要开启需要自己进行配置
+     *           现在发送消息和消费消息实际上默认都走10911端口了，无需再关心10909（vip通道）端口了
+     * @param isChange isChange
+     * @param brokerAddr brokerAddr
+     * @return String
+     */
     public static String brokerVIPChannel(final boolean isChange, final String brokerAddr) {
         if (isChange) {
             int split = brokerAddr.lastIndexOf(":");

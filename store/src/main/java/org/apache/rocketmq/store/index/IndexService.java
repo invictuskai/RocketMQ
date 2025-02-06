@@ -40,7 +40,10 @@ public class IndexService {
      */
     private static final int MAX_TRY_IDX_CREATE = 3;
     private final DefaultMessageStore defaultMessageStore;
+
+    //Hash Slot 部分存储固定数量的 Message Key hash槽 (500万个，该数值可以通过 Broker 配置项 maxHashSlotNum 来配置)
     private final int hashSlotNum;
+    //部分存储固定数量的索引项（2000万个，该数值可以通过 Broker 配置项 maxIndexNum 来配置）。
     private final int indexNum;
     private final String storePath;
     private final ArrayList<IndexFile> indexFileList = new ArrayList<IndexFile>();
@@ -53,18 +56,29 @@ public class IndexService {
         this.storePath =
             StorePathConfigHelper.getStorePathIndex(store.getMessageStoreConfig().getStorePathRootDir());
     }
-
+    /**
+     * indexFile提供了一种可以通过key或时间戳来查询消息的方法
+     * indexFile是以创建时的时间戳命名的，固定的单个indexFile大小约为400M。一个indexFile可以保存2000个索引
+     * indexFile的底层存储设计为HashMap结构，故RocketMQ的索引文件其底层实现为hash索引
+     *
+     * @param lastExitOK 上次是否正常退出
+     * @return
+     */
     public boolean load(final boolean lastExitOK) {
+        // 获取上级目录名称  storePathRootDir/index
         File dir = new File(this.storePath);
+        // 获取内部的index索引文件
         File[] files = dir.listFiles();
         if (files != null) {
             // ascending order
             Arrays.sort(files);
             for (File file : files) {
                 try {
+                    // 一个index文件对应着一个IndexFile实例
                     IndexFile f = new IndexFile(file.getPath(), this.hashSlotNum, this.indexNum, 0, 0);
+                    // 加载index文件
                     f.load();
-
+                    // 如果上一次是异常退出，并且当前index文件中最后一个消息的落盘时间大于最后一个index索引文件的创建时间，则该索引文件被删除
                     if (!lastExitOK) {
                         if (f.getEndTimestamp() > this.defaultMessageStore.getStoreCheckpoint()
                             .getIndexMsgTimestamp()) {

@@ -118,23 +118,34 @@ public class  MappedFileQueue {
         return mfs;
     }
 
+    /**
+     * MappedFileQueue的方法
+     * @param offset 文件的最大有效数据偏移量
+     */
     public void truncateDirtyFiles(long offset) {
+        //待移除的文件集合
         List<MappedFile> willRemoveFiles = new ArrayList<MappedFile>();
-
+        //遍历内部所有的MappedFile文件
         for (MappedFile file : this.mappedFiles) {
+            //获取当前文件自身的最大数据偏移
             long fileTailOffset = file.getFileFromOffset() + this.mappedFileSize;
+            //如果最大数据偏移量大于最大有效数据偏移量
             if (fileTailOffset > offset) {
+                //如果最大有效数据偏移量大于等于该文件的起始偏移量，那么说明文件当中有一部分数据是有效的，那么设置该文件的的有效属性
                 if (offset >= file.getFileFromOffset()) {
+                    //设置当前文件的刷盘、提交、写入指针为当前最大有效数据偏移量
                     file.setWrotePosition((int) (offset % this.mappedFileSize));
                     file.setCommittedPosition((int) (offset % this.mappedFileSize));
                     file.setFlushedPosition((int) (offset % this.mappedFileSize));
                 } else {
+                    //如果最大有效数据偏移量小于该文件的起始偏移量，那么删除该文件
                     file.destroy(1000);
+                    //记录到待删除的文件集合中
                     willRemoveFiles.add(file);
                 }
             }
         }
-
+        //将等待移除的文件整体从mappedFiles中移除
         this.deleteExpiredFile(willRemoveFiles);
     }
 
@@ -163,12 +174,19 @@ public class  MappedFileQueue {
 
     // broker启动阶段加载本地磁盘数据使用，读取storePath目录下的文件创建对应的mappedFile对象并放list中
     public boolean load() {
-        // 根据目录创建目录对象
+        // 获取commitLog文件的存放目录，根据目录创建目录对象
         File dir = new File(this.storePath);
 
-        //获取当前目录下的所有文件对象
+        /**
+         * 如果file是个文件 泽返回null
+         * 如果file是个空目录 则返回空数组
+         * 如果file不是空目录，则返回的是该目录下的文件和目录
+         */
         File[] ls = dir.listFiles();
         if (ls != null) {
+            /**
+             * 存在commitLog文件则进行加载
+             */
             return doLoad(Arrays.asList(ls));
         }
         return true;
@@ -176,13 +194,13 @@ public class  MappedFileQueue {
 
     public boolean doLoad(List<File> files) {
         // ascending order
-        // 文件排序
+        // 对commitLog文件按照文件名进行升序排序
         files.sort(Comparator.comparing(File::getName));
 
         // 遍历文件
         for (File file : files) {
 
-            // 如果文件大小不等于mappedFileSize
+            // 如果文件大小不等于mappedFileSize，文件实际大小是否等于预定的文件大小 不等则返回false，不再加载其他文件
             if (file.length() != this.mappedFileSize) {
                 log.warn(file + "\t" + file.length()
                         + " length not matched message store config value, please check it manually");
@@ -190,8 +208,15 @@ public class  MappedFileQueue {
             }
 
             try {
-
-                // 创建MappedFile对象并初始化
+                /**
+                 * 每一个commitLog文件都创建一个对应的MappedFile对象
+                 * 在物理层面，commitLog目录下面是一个个的commitLog文件，但是在java中进行了三层映射，commitLog- MappedFileQueue- MappedFile
+                 * commitLog中包含MappedFileQueue以及commitLog的其他服务，比如刷盘服务
+                 * mappedFileQueue中包含MappedFile集合以及耽搁commitLog文件大小等属性
+                 * MappedFile才是真正的commitLog文件在java中的映射，包含文件名，大小，mmap对象MappedByteBuffer等属性
+                 *
+                 * 实际上MappedFileQueue和MappedFile都是通用类，commitLog，consumeQueue，indexFile都会用到
+                 */
                 MappedFile mappedFile = new MappedFile(file.getPath(), mappedFileSize);
                 // 都不是准确值，准确值会在recover阶段确定
                 mappedFile.setWrotePosition(this.mappedFileSize);

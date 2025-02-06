@@ -273,6 +273,10 @@ public class ScheduleMessageService extends ConfigManager {
         return delayOffsetSerializeWrapper.toJson(prettyFormat);
     }
 
+    /**
+     * 解析延迟级别
+     * @return
+     */
     public boolean parseDelayLevel() {
         HashMap<String, Long> timeUnitTable = new HashMap<String, Long>();
         timeUnitTable.put("s", 1000L);
@@ -280,20 +284,37 @@ public class ScheduleMessageService extends ConfigManager {
         timeUnitTable.put("h", 1000L * 60 * 60);
         timeUnitTable.put("d", 1000L * 60 * 60 * 24);
 
+        /**
+         * 延迟时长 "1s 5s 10s 30s 1m 2m 3m 4m 5m 6m 7m 8m 9m 10m 20m 30m 1h 2h"
+         * 将各个等级的延迟时长等级获取成一个延迟时长字符串
+         */
         String levelString = this.defaultMessageStore.getMessageStoreConfig().getMessageDelayLevel();
         try {
+            // 将字符串一空格尾分隔符，分割成延迟等级字符串数组
             String[] levelArray = levelString.split(" ");
+
             for (int i = 0; i < levelArray.length; i++) {
+                // 获取单个延迟时长
                 String value = levelArray[i];
+                // 获取对应延迟时长对应的时间单位
                 String ch = value.substring(value.length() - 1);
+                // 根据时间单位去timeUnitTable中获取对应的时间单位对应的毫秒数
                 Long tu = timeUnitTable.get(ch);
 
                 int level = i + 1;
+                //更新最大延迟等级
                 if (level > this.maxDelayLevel) {
                     this.maxDelayLevel = level;
                 }
+                /**
+                 * 举例说明
+                 * num = 3
+                 * tu = 1000L * 60
+                 * delayTimeMillis = 1000L * 60 * 3
+                 */
                 long num = Long.parseLong(value.substring(0, value.length() - 1));
                 long delayTimeMillis = tu * num;
+                // 将延迟等级以及对应的时长放入delayLevelTable中
                 this.delayLevelTable.put(level, delayTimeMillis);
                 if (this.enableAsyncDeliver) {
                     this.deliverPendingTable.put(level, new LinkedBlockingQueue<>());

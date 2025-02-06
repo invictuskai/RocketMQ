@@ -20,11 +20,23 @@ import com.alibaba.fastjson.JSON;
 import org.apache.rocketmq.common.message.MessageQueue;
 
 public class SendResult {
+    // 表示消息发送结果的状态
     private SendStatus sendStatus;
+
+    // 注意这里的命名虽然是msgId，但实际上其是Unique Key 从逻辑上唯一代表一条消息。
     private String msgId;
+
+    //消息发送到了哪个的队列
     private MessageQueue messageQueue;
+
+    // 消息在队列中的偏移量，每次发送到一个队列时，offset+1
     private long queueOffset;
     private String transactionId;
+    /**
+     * 常规意义上我们所说的Message Id是在Broker端生成的，用于唯一标识一条消息，在根据Message Id查询的情况下，最多只能查询到一条消息。
+     * Message Id总共 16 字节，包含消息存储主机地址，消息 Commit Log offset。
+     *   消息所属broker地址(8byte)+CommitLog offset(8byte)
+     */
     private String offsetMsgId;
     private String regionId;
     private boolean traceOn = true;

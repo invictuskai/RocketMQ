@@ -29,6 +29,20 @@ import org.apache.rocketmq.logging.InternalLoggerFactory;
 import org.apache.rocketmq.store.config.BrokerRole;
 import org.apache.rocketmq.store.config.StorePathConfigHelper;
 
+/**
+ *
+ * ConsumeQueue文件是消息消费队列文件，是CommitLog文件基于topic的索引文件，主要用于消费者根据topic消费消息，其组织方式为/topic/queue，同一个队列中存在多个消息文件。
+ * ConsumeQueue的设计极具技巧，每个条目长度固定（8字节CommitLog物理偏移量、4字节消息长度、8字节tag哈希码）。这里不是存储tag的原始字符串，而是存储哈希码，
+ * 目的是确保每个条目的长度固定，可以使用访问类似数组下标的方式快速定位条目，极大地提高了ConsumeQueue文件的读取性能。消息消费者根据topic、消息消费进度（ConsumeQueue逻辑偏
+ * 移量），即第几个ConsumeQueue条目，这样的消费进度去访问消息，通过逻辑偏移量logicOffset×20，即可找到该条目的起始偏移量（ConsumeQueue文件中的偏移量），然后读取该偏移量后20个字节即
+ * 可得到一个条目，无须遍历ConsumeQueue文件。
+ * RocketMQ中默认指定每个消费队列的文件存储30万条消息的索引，而一个索引占用20个字节，这样每个文件的大小便是固定值300000*20/1024/1024≈5.72M，而文件命名采用与commit log相似的方式，即总长度20位，高位补0
+ * 为什么消费队列文件存储消息的个数要设置成30万呢？一个文件还不到6M，为何不能像commit log那样设置为1G呢？鄙人没有在源码及网上找到相关资料，猜测可能是个经验值。
+ * 首先该值不宜设置的过大，因为消息总是有失效期的，例如3天失效，如果消费队列的文件设置过大的话，有可能一个文件中包含了过去一个月的消息，时间跨度过大，这样不利于及时删除已经过期的消息；
+ * ，太小的话会产生大量的小文件，在管理维护上制造负担。最理想情况是一个消费队列文件对应一个commit log，这样commit log过期时，消费队列文件也跟着及时失效
+ *
+ * consumeQueue是每个topic的每个消费队列都会生产多个文件
+ */
 public class ConsumeQueue {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.STORE_LOGGER_NAME);
 
@@ -88,48 +102,68 @@ public class ConsumeQueue {
         }
         return result;
     }
-
+    /**
+     * ConsumeQueue的recover()方法
+     */
     public void recover() {
+        //获取所有的ConsumeQueue文件映射的mappedFiles集合
         final List<MappedFile> mappedFiles = this.mappedFileQueue.getMappedFiles();
+        //如果存在commitlog文件集合
         if (!mappedFiles.isEmpty()) {
-
+            //从倒数第三个文件开始恢复
             int index = mappedFiles.size() - 3;
             if (index < 0)
+                //不足3个文件，则直接从第1个文件开始进行恢复
                 index = 0;
 
+            //consumequeue映射文件的大小
             int mappedFileSizeLogics = this.mappedFileSize;
+            //获取文件对应的映射对象
             MappedFile mappedFile = mappedFiles.get(index);
+            //文件映射对应的DriectByteBuffer
             ByteBuffer byteBuffer = mappedFile.sliceByteBuffer();
+            //获取文件映射的初始物理偏移量，其实和文件名相同
             long processOffset = mappedFile.getFileFromOffset();
+            //consumequeue映射文件的有效offset
             long mappedFileOffset = 0;
             long maxExtAddr = 1;
             while (true) {
+                //校验每一个索引条目的有效性，CQ_STORE_UNIT_SIZE是每隔条目的大小，默认20
                 for (int i = 0; i < mappedFileSizeLogics; i += CQ_STORE_UNIT_SIZE) {
+                    //获取该条目对应的消息在commitlog文件中的物理偏移量
                     long offset = byteBuffer.getLong();
+                    //获取该条目对应的消息在commitlog文件中的总长度
                     int size = byteBuffer.getInt();
+                    //获取该条目对应的消息的tag哈希值
                     long tagsCode = byteBuffer.getLong();
-
+                    //如果offset 和 size 都大于0，则表示当前条目有效
                     if (offset >= 0 && size > 0) {
+                        //更新当前ConsumeQueue文件中的有效数据偏移量
                         mappedFileOffset = i + CQ_STORE_UNIT_SIZE;
+                        //跟新当前queueId目录下所有的ConsumeQueue文件中的最大有效物理偏移量
                         this.maxPhysicOffset = offset + size;
                         if (isExtAddr(tagsCode)) {
                             maxExtAddr = tagsCode;
                         }
                     } else {
+                        //否则，表示当前条目无效了，后续的条目不会遍历
                         log.info("recover current consume queue file over,  " + mappedFile.getFileName() + " "
                             + offset + " " + size + " " + tagsCode);
                         break;
                     }
                 }
-
+                //如果当前ConsumeQueue文件中的有效数据偏移量和文件大小一样，则表示该ConsumeQueue文件中的所有条目都是有效的
                 if (mappedFileOffset == mappedFileSizeLogics) {
+                    //遍历下一个文件
                     index++;
+                    //遍历到了最后一个文件，则结束遍历
                     if (index >= mappedFiles.size()) {
 
                         log.info("recover last consume queue file over, last mapped file "
                             + mappedFile.getFileName());
                         break;
                     } else {
+                        //获取下一个文件的数据
                         mappedFile = mappedFiles.get(index);
                         byteBuffer = mappedFile.sliceByteBuffer();
                         processOffset = mappedFile.getFileFromOffset();
@@ -137,17 +171,28 @@ public class ConsumeQueue {
                         log.info("recover next consume queue file, " + mappedFile.getFileName());
                     }
                 } else {
+                    //如果不相等，则表示当前ConsumeQueue有部分无效数据，恢复结束
                     log.info("recover current consume queue over " + mappedFile.getFileName() + " "
                         + (processOffset + mappedFileOffset));
                     break;
                 }
             }
-
+            //该文件映射的已恢复的物理偏移量
             processOffset += mappedFileOffset;
+            //设置当前queueId下面的所有的ConsumeQueue文件的最新数据
+            //设置刷盘最新位置，提交的最新位置
             this.mappedFileQueue.setFlushedWhere(processOffset);
             this.mappedFileQueue.setCommittedWhere(processOffset);
+            /**
+             * 删除文件中最大有效数据偏移量processOffset以后的所有数据
+             * 该方法会校验，如果文件最大数据偏移量大于最大有效数据偏移量
+             * 最大数据偏移量：文件的最大数据偏移
+             * 最大有效数据偏移量：最后一个有效条目在自身文件中的偏移量
+             *      1. 那么将文件起始偏移量大于最大有效数据偏移量的文件进行整个删除
+             *      2. 否则设置该文件的有效数据位置为最大有效数据偏移量
+             */
             this.mappedFileQueue.truncateDirtyFiles(processOffset);
-
+            //是否启用外部读取，默认不启用
             if (isExtReadEnable()) {
                 this.consumeQueueExt.recover();
                 log.info("Truncate consume queue extend file by max {}", maxExtAddr);

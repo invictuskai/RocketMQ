@@ -41,7 +41,9 @@ public class BrokerConfig {
     @ImportantField
     private String brokerClusterName = "DefaultCluster";
     @ImportantField
+    // broker是否为主节点
     private long brokerId = MixAll.MASTER_ID;
+    // broker 权限
     private int brokerPermission = PermName.PERM_READ | PermName.PERM_WRITE;
     private int defaultTopicQueueNums = 8;
     @ImportantField

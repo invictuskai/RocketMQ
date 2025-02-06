@@ -147,17 +147,14 @@ public abstract class NettyRemotingAbstract {
     }
 
     /**
-     * Entry of incoming command processing.
-     * 处理消息发送请求
-     * <p>
-     * <strong>Note:</strong>
-     * The incoming remoting command may be
-     * <ul>
-     * <li>An inquiry request from a remote peer component;</li>
-     * <li>A response to a previous request issued by this very participant.</li>
-     * </ul>
-     * </p>
-     *
+     /**
+     * NettyRemotingAbstract的方法
+     * 这个方法我们在学习Producer发送消息源码的时候就见过了，它会根据接收到的消息是请求还是响应，选择不同的方法处理
+     * 如果是请求消息则调用processRequestCommand方法，如果是响应消息则用processResponseCommand方法。
+     * 在这里，是Broker端接收Producer的请求，因此会调用processRequestCommand，而如果是Producer端接收到了Broker的响应，则是调用processResponseCommand方法处理。
+     * 处理RemotingCommand命令消息，传入的远程处理命令可能是：
+     * 1. 来自远程对等组件的查询需求
+     * 2. 对该参与者之前发出的请求的响应
      * @param ctx Channel handler context.
      * @param msg incoming remoting command.
      * @throws Exception if there were any error while processing the incoming command.
@@ -167,11 +164,11 @@ public abstract class NettyRemotingAbstract {
         if (cmd != null) {
             // 根据协议传输对象的不同类型做不同的处理
             switch (cmd.getType()) {
-                // client主动发起的请求
+                // 作为server，处理来自client主动发起的请求
                 case REQUEST_COMMAND:
                     processRequestCommand(ctx, cmd);
                     break;
-                // client请求后得到服务端的响应，这个得到的相应消息类型为RESPONSE_COMMAND
+                // 作为client，处理请求后得到的服务端的响应，这个得到的相应消息类型为RESPONSE_COMMAND
                 case RESPONSE_COMMAND:
                     // 处理客户端返回结果，同时移除responseTable中的映射信息
                     processResponseCommand(ctx, cmd);

@@ -61,6 +61,9 @@ import org.apache.rocketmq.store.config.MessageStoreConfig;
 import org.apache.rocketmq.store.config.StorePathConfigHelper;
 import org.apache.rocketmq.store.stats.BrokerStatsManager;
 
+/**
+ * 专门用来处理发送消息请求，也就是说Producer发送消息类请求都是通过这个处理器来处理的。
+ */
 public class SendMessageProcessor extends AbstractSendMessageProcessor {
 
     private List<ConsumeMessageHook> consumeMessageHookList;

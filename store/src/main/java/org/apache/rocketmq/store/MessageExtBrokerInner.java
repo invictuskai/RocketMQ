@@ -22,6 +22,7 @@ import org.apache.rocketmq.common.TopicFilterType;
 import org.apache.rocketmq.common.message.MessageExt;
 
 // broker内部消息数据结构，对消息进行封装，
+// 是存储内部使用的 Message 对象，在 rocketmq-store 模块使用
 public class MessageExtBrokerInner extends MessageExt {
     private static final long serialVersionUID = 7256001576878700634L;
     private String propertiesString;

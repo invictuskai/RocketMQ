@@ -25,6 +25,11 @@ import org.apache.rocketmq.logging.InternalLogger;
 import org.apache.rocketmq.logging.InternalLoggerFactory;
 import org.apache.rocketmq.store.MappedFile;
 
+/**
+ * Index索引文件的设计理念是为了加速消息的检索性能，根据消息的属性从CommitLog文件中快速检索消息。
+ * 主要存储消息key与offset的对应关系。
+ * 这个indexFile中的索引数据是包含Key的消息被发送到Broker时写入的。如果消息中没有Key，不会被写入。
+ */
 public class IndexFile {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.STORE_LOGGER_NAME);
     private static int hashSlotSize = 4;

@@ -21,6 +21,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class IndexHeader {
+    // 长度
     public static final int INDEX_HEADER_SIZE = 40;
     private static int beginTimestampIndex = 0;
     private static int endTimestampIndex = 8;
@@ -29,11 +30,22 @@ public class IndexHeader {
     private static int hashSlotcountIndex = 32;
     private static int indexCountIndex = 36;
     private final ByteBuffer byteBuffer;
+    //最早的消息存储时间（消息存储到 CommitLog 的时间）
     private final AtomicLong beginTimestamp = new AtomicLong(0);
+
+    // 最晚的消息存储时间（消息存储到 CommitLog 的时间）
     private final AtomicLong endTimestamp = new AtomicLong(0);
+
+    // 存储的消息的最小物理偏移量（在 CommitLog 中的偏移量）
     private final AtomicLong beginPhyOffset = new AtomicLong(0);
+
+    // 存储的消息的最大物理偏移量（在 CommitLog 中的偏移量）
     private final AtomicLong endPhyOffset = new AtomicLong(0);
+
+    // 含有index的slot数量。注意，并不是每slot都挂载index索引单元，hashSlotCount统计的是所有挂载了index索引单元的slot数量。
     private final AtomicInteger hashSlotCount = new AtomicInteger(0);
+    // 包含的索引单元的个数。
+    // 注意，并不是每条索引单元都挂载了index索引单元，indexCount统计的是所有挂载了index索引单元的索引单元数量。
     private final AtomicInteger indexCount = new AtomicInteger(1);
 
     public IndexHeader(final ByteBuffer byteBuffer) {

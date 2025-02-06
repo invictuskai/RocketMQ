@@ -36,6 +36,20 @@ public class StoreCheckpoint {
     private volatile long logicsMsgTimestamp = 0;
     private volatile long indexMsgTimestamp = 0;
 
+    /**
+     * StoreCheckpoint记录着commitLog、consumeQueue、index文件的最后更新时间点，当上一次broker是异常结束时，会根据StoreCheckpoint的数据进行恢复，这决定着文件从哪里开始恢复，甚至是删除文件。
+     *
+     * StoreCheckpoint记录了以下关键属性
+     *
+     * 1. physicMsgTimestamp：最新commitLog文件的刷盘时间戳，单位毫秒；
+     *
+     * 2. logicsMsgTimestamp：最新consumeQueue文件的刷盘时间戳，单位毫秒；
+     *
+     * 3. indexMsgTimestamp：创建最新indexFile文件的时间戳，单位毫秒；
+     *
+     * @param scpPath
+     * @throws IOException
+     */
     public StoreCheckpoint(final String scpPath) throws IOException {
         File file = new File(scpPath);
         MappedFile.ensureDirOK(file.getParent());

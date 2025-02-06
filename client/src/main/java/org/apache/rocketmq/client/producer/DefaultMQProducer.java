@@ -380,6 +380,12 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
      * @throws InterruptedException if the sending thread is interrupted.
      */
     // 同步发送消息，具体发送到主题中的哪个消息队列由负载算法决定。
+
+    /**
+     * 发送单条消息时，消息体的内容将保存在body中。发送批量消息时，需要将多条消息体的内容存储在body中。如何存储更便于服务端
+     * 正确解析每条消息呢？RocketMQ采取的方式是，对单条消息内容使用固定格式进行存储
+     * 总长度4字节--魔数4字节--boyCRC4字节--Flag4字节--body长度4字节--消息体N字节--属性长度2字节--扩展属性N字节
+     */
     @Override
     public SendResult send(
         Message msg) throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
@@ -967,7 +973,18 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
         return this.defaultMQProducerImpl.queryMessageByUniqKey(withNamespace(topic), msgId);
     }
 
-    // 同步批量消息发送。
+    /**
+     * 批量消息发送是将同一主题的多条消息一起打包发送到消息服务端，减少网络调用次数，提高网络传输效率。当然，并不是在同一批
+     * 次中发送的消息数量越多，性能就越好，判断依据是单条消息的长度，如果单条消息内容比较长，则打包发送多条消息会影响其他线程
+     * 发送消息的响应时间，并且单批次消息发送总长度不能超过DefaultMQProducer#maxMessageSize。批量发送消息要解决的是如何将这些消
+     * 息编码，以便服务端能够正确解码每条消息的内容。
+     * @param msgs
+     * @return
+     * @throws MQClientException
+     * @throws RemotingException
+     * @throws MQBrokerException
+     * @throws InterruptedException
+     */
     @Override
     public SendResult send(
         Collection<Message> msgs) throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
@@ -1044,15 +1061,26 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
         this.retryResponseCodes.add(responseCode);
     }
 
+    /**
+     * 将一批消息封装成MessageBatch对象。Message-Batch继承自Message对象，内部持有List<Message> messages。
+     * 这样一来，批量消息发送与单条消息发送的处理流程就完全一样了。MessageBatch只需要将该集合中每条消息
+     * 的消息体聚合成一个byte[]数组，在消息服务端能够从该byte[]数组中正确解析出消息
+     * @param msgs 消息列表
+     * @return MessageBatch
+     * @throws MQClientException
+     */
     private MessageBatch batch(Collection<Message> msgs) throws MQClientException {
         MessageBatch msgBatch;
         try {
+            //1 将消息集合转换为MessageBatch
             msgBatch = MessageBatch.generateFromList(msgs);
             for (Message message : msgBatch) {
                 Validators.checkMessage(message, this);
+                //2 迭代每个消息，逐一设置Unique Key
                 MessageClientIDSetter.setUniqID(message);
                 message.setTopic(withNamespace(message.getTopic()));
             }
+            // MessageBatch的body属性是byte[]类型，需要将MessageBatch对象编码成byte[]数组
             msgBatch.setBody(msgBatch.encode());
         } catch (Exception e) {
             throw new MQClientException("Failed to initiate the MessageBatch", e);

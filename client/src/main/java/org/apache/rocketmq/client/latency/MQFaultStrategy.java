@@ -114,7 +114,7 @@ public class MQFaultStrategy {
         // 发送延迟故障自动切换Queue功能开启
         if (this.sendLatencyFaultEnable) {
             // isolation表示是否开启延迟隔离，默认不开启；开启之后默认当前消息发送时长为30s
-            // 根据发送消息时长计算broker不可用时长
+            //根据消息当前延迟currentLatency计算当前broker的故障延迟的时间为duration
             long duration = computeNotAvailableDuration(isolation ? 30000 : currentLatency);
             this.latencyFaultTolerance.updateFaultItem(brokerName, currentLatency, duration);
         }

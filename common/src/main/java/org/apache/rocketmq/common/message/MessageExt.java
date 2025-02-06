@@ -24,7 +24,7 @@ import java.nio.ByteBuffer;
 import org.apache.rocketmq.common.TopicFilterType;
 import org.apache.rocketmq.common.sysflag.MessageSysFlag;
 
-// 消息扩展对象，用于记录当前消息的其他属性
+// 消息扩展对象，用于记录当前消息的其他属性,在 Broker 上产生此对象
 public class MessageExt extends Message {
     private static final long serialVersionUID = 5720810158625748049L;
 

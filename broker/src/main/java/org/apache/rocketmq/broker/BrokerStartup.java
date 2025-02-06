@@ -172,7 +172,7 @@ public class BrokerStartup {
                 }
             }
             /**
-             *
+             * 设置 校验brokerId brokerId =0为master，brokerId >0为slave
              */
             switch (messageStoreConfig.getBrokerRole()) {
                 case ASYNC_MASTER:
@@ -189,11 +189,12 @@ public class BrokerStartup {
                 default:
                     break;
             }
-
+            // 是否开启多副本 主从切换集群
             if (messageStoreConfig.isEnableDLegerCommitLog()) {
                 brokerConfig.setBrokerId(-1);
             }
 
+            // 设置高可用通信监听关口 默认端口号+1 默认端口是10911。这个端口主要用于主从同步之类的高可用操作
             messageStoreConfig.setHaListenPort(nettyServerConfig.getListenPort() + 1);
             LoggerContext lc = (LoggerContext) LoggerFactory.getILoggerFactory();
             JoranConfigurator configurator = new JoranConfigurator();
@@ -207,7 +208,7 @@ public class BrokerStartup {
                 System.setProperty("brokerLogDir", brokerConfig.getBrokerName() + "_" + messageStoreConfig.getdLegerSelfId());
             }
             configurator.doConfigure(brokerConfig.getRocketmqHome() + "/conf/logback_broker.xml");
-
+            // 判断命令行中是否包含字符'p'（printConfigItem）和'm'，如果存在则打印配置信息并结束jvm运行，没有的话就不用管
             if (commandLine.hasOption('p')) {
                 InternalLogger console = InternalLoggerFactory.getLogger(LoggerName.BROKER_CONSOLE_NAME);
                 MixAll.printObjectProperties(console, brokerConfig);
@@ -223,27 +224,29 @@ public class BrokerStartup {
                 MixAll.printObjectProperties(console, messageStoreConfig, true);
                 System.exit(0);
             }
-
+            // 打印当前broker的配置日志
             log = InternalLoggerFactory.getLogger(LoggerName.BROKER_LOGGER_NAME);
             MixAll.printObjectProperties(log, brokerConfig);
             MixAll.printObjectProperties(log, nettyServerConfig);
             MixAll.printObjectProperties(log, nettyClientConfig);
             MixAll.printObjectProperties(log, messageStoreConfig);
-
+            // 实例化 BrokerController，内部主要初始化了一些配置类、manager类、处理器、线程池等
             final BrokerController controller = new BrokerController(
                 brokerConfig,
                 nettyServerConfig,
                 nettyClientConfig,
                 messageStoreConfig);
             // remember all configs to prevent discard
+            // 将所有的-c的外部配置信息保存到BrokerController中的Configuration对象属性的allConfigs属性中
             controller.getConfiguration().registerConfig(properties);
 
+            // 初始化BrokerController
             boolean initResult = controller.initialize();
             if (!initResult) {
                 controller.shutdown();
                 System.exit(-3);
             }
-
+            // 添加关闭钩子方法，在Broker关闭之前执行，进行一些内存清理、对象销毁等操作
             Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
                 private volatile boolean hasShutdown = false;
                 private AtomicInteger shutdownTimes = new AtomicInteger(0);

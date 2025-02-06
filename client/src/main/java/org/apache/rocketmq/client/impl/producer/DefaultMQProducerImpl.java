@@ -612,7 +612,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
     }
 
     /**
-     * 这个代码在消息推送到broker之后会立马调用,出现异常时捕获异常也会调用，
+     * 这个代码在消息推送到broker之后会立马调用,出现异常时捕获异常也会调用，更新本地错误表缓存数据，用于延迟时间的故障转移功能。
      * @param brokerName brokerName
      * @param currentLatency 发送耗时
      * @param isolation 是否规避Broker，该参数如果为true，则使用默认时长30s来计算Broker故障规避时长，如果为false，则使用本次消息发送延迟时间来计算Broker故障规避时长。
@@ -888,7 +888,18 @@ public class DefaultMQProducerImpl implements MQProducerInner {
     }
 
     /**
-     *
+     * DefaultMQProducerImpl的方法
+     * 发送消息：选择了消息队列之后，会调用sendKernelImpl方法进行消息的发送。
+     * 方法的主要步骤：
+     * 1. 首先调用findBrokerAddressInPublish方法从brokerAddrTable中查找Master broker地址。如果找不到，那么再次调用tryToFindTopicPublishInfo方法从nameServer远程拉取配置，并更新本地缓存，随后再次尝试获取Master broker地址。
+     * 2. 调用brokerVIPChannel判断是否开启vip通道，如果开启了，那么将brokerAddr的port – 2，因为vip通道的端口为普通端口 – 2。
+     * 3. 如果不是批量消息，那么设置唯一的uniqId。
+     * 4. 如果不是批量消息，并且消息体大于4K，那么进行消息压缩。
+     * 5. 如果存在CheckForbiddenHook，则执行checkForbidden钩子方法。如果存在SendMessageHook，则执行sendMessageBefore钩子方法。
+     * 6. 设置请求头信息SendMessageRequestHeader，请求头包含各种基本属性，例如producerGroup、topic、queueId等，并且针对重试消息的处理，将消息重试次数和最大重试次数存入请求头中。
+     * 7. 根据不同的发送模式发送消息。如果是异步发送模式，则需要先克隆并还原消息。最终异步、单向、同步模式都是调用MQClientAPIImpl#sendMessage方法发送消息的。
+     * 8. 如果MQClientAPIImpl#sendMessage方法正常发送或者抛出RemotingException、MQBrokerException、InterruptedException异常，那么会判断如果存在SendMessageHook，则执行sendMessageAfter钩子方法。
+     * 9. 在finally块中，对原始消息进行恢复
      * @param msg 待发送的消息
      * @param mq 消息要发送到的目标队列
      * @param communicationMode 消息发送模式 SYNC ASYNC ONEWAY
@@ -939,7 +950,23 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                 //for MessageBatch,ID has been set in the generating process
                 if (!(msg instanceof MessageBatch)) {
 
-                    // 为消息分配全局唯一ID，UNIQ_KEY属性对应的值，服务器会更根据这个UNIQ_KEY创建hash索引
+                    /**
+                     * 为消息分配全局唯一ID，UNIQ_KEY属性对应的值，服务器会更根据这个UNIQ_KEY创建hash索引
+                     * Unique Key作用
+                     * RocketMQ并不保证消息投递过程中的Exactly Once语义，即消息只会被精确消费一次，需要消费者自己做幂等。而通常导致消息重复消费的原因，主要包括：
+                     *
+                     *      1,生产者发送时消息重复：RocketMQ对于无序消息发送失败，默认会重试2次
+                     *
+                     *      2,消费者Rebalance时消息重复
+                     *
+                     * 1，导致生产者发送重复消息的原因可能是：一条消息已被成功发送到服务端并完成持久化，由于网络超时此时出现了网络闪断或者客户端宕机，导致服务端对客户端应答失败，此时生产者将再次尝试发送消息。
+                     *
+                     * 2，在重试发送时，sendKernelImpl会被重复调用，意味着setUniqID方法会被重复调用，不过由于setUniqID方法实现中进行判空处理，因此不会重复设置Unique Key。
+                     *    在这种情况下，消费者后续会收到两条内容相同并且 Unique Key 也相同的消息(offsetMsgId不同，因为对Broker来说存储了多次)。
+                     * 那么消费者如何判断，消费重复是因为重复发送还是Rebalance导致的重复消费呢？
+                     *      消费者实现MessageListener接口监听到的消息类型是MessageExt，可以将其强制转换为MessageClientExt，之后调用getMsgId方法获取Unique Key，调用getOffsetMsgId获得Message Id。
+                     *      如果多消息的Unique Key相同，但是offsetMsgId不同，则有可能是因为重复发送导致。
+                     */
                     MessageClientIDSetter.setUniqID(msg);
                 }
 
@@ -955,7 +982,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                 // 消息是否压缩
                 boolean msgBodyCompressed = false;
 
-                // 判断是否需要对消息进行压缩
+                // 判断是否需要对消息进行压缩 如果消息体大于4k，则进行压缩
                 if (this.tryToCompressMessage(msg)) {
 
                     // 设置消息的系统标记为MessageSysFlag.COMPRESSED_FLAG。并记录压缩方式
@@ -1175,15 +1202,25 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         return mQClientFactory;
     }
 
+    /**
+     * DefaultMQProducerImpl的方法
+     * 压缩消息：在发送单条消息的时候，会判断如果消息体超过4k，那么会进行消息的压缩，压缩比默认5，压缩完毕之后设置压缩标志；
+     *         批量消息不支持压缩。消息压缩有利于更快的进行网络数据传输
+     * @param msg
+     * @return
+     */
     private boolean tryToCompressMessage(final Message msg) {
+        //如果是批量消息，那么不进行压缩
         if (msg instanceof MessageBatch) {
             //batch does not support compressing right now
             return false;
         }
         byte[] body = msg.getBody();
         if (body != null) {
+            //如果消息长度大于4k
             if (body.length >= this.defaultMQProducer.getCompressMsgBodyOverHowmuch()) {
                 try {
+                    //重新设置到body中
                     byte[] data = compressor.compress(body, compressLevel);
                     if (data != null) {
                         msg.setBody(data);

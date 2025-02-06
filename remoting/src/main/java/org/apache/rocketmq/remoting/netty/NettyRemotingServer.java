@@ -358,7 +358,9 @@ public class NettyRemotingServer extends NettyRemotingAbstract implements Remoti
         }
     }
 
-    // 注册业务处理器
+    // 注册业务处理器，将处理器和对应的线程池绑定为一个Pair对象，并且将这个pair对象放入processorTable中， 其值就是pair对象，key就是对应的请求编码RequestCode。
+    //  每个请求，都会根据自己携带的RequestCode在processorTable中查找对应的处理器以及对应的执行器线程池来处理请求。 RocketMQ通过这样的方式来提升处理请求的性能。
+
     @Override
     public void registerProcessor(int requestCode, NettyRequestProcessor processor, ExecutorService executor) {
         ExecutorService executorThis = executor;
@@ -524,11 +526,15 @@ public class NettyRemotingServer extends NettyRemotingAbstract implements Remoti
         }
     }
 
+    /**
+     * Nett服务端收到消息的时候，首先会在NettyServerHandler中进行处理
+     */
     @ChannelHandler.Sharable
     class NettyServerHandler extends SimpleChannelInboundHandler<RemotingCommand> {
 
         @Override
         protected void channelRead0(ChannelHandlerContext ctx, RemotingCommand msg) throws Exception {
+            // 处理客户端的请求
             processMessageReceived(ctx, msg);
         }
     }

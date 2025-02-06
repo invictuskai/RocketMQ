@@ -52,7 +52,13 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 /**
- * Store all metadata downtime for recovery, data protection reliability
+ * RocketMQ在消息写入过程中追求极致的磁盘顺序写，所有主题的消息全部写入一个文件，即CommitLog文件。所有消息按抵达顺序依次
+ * 追加到CommitLog文件中，消息一旦写入，不支持修改。尽最大的能力确保消息发送的高性能与高吞吐量。
+ *
+ * CommitLog文件的命名方式是使用存储在该文件的第一条消息在整个CommitLog文件组中的偏移量来命名，例如第一个CommitLog文件为0000000000000000000，
+ * 第二个CommitLog文件为00000000001073741824，以此类推
+ * 这样做的好处是给出任意一个消息的物理偏移量，可以通过二分法进行查找，快速定位这个文件的位置，然后用消息物理偏移量减去
+ * 所在文件的名称，得到的差值就是在该文件中的绝对地址。
  */
 public class CommitLog {
     // Message's MAGIC CODE daa320a7
@@ -130,6 +136,10 @@ public class CommitLog {
         return putMessageThreadLocal;
     }
 
+    /**
+     * 实际上是委托内部的MappedFile的load方法进行加载
+     * @return
+     */
     public boolean load() {
         boolean result = this.mappedFileQueue.load();
         log.info("load commit log " + (result ? "OK" : "Failed"));
@@ -204,10 +214,20 @@ public class CommitLog {
         return null;
     }
 
+
     /**
      * When the normal exit, data recovery, all memory data have been flush
+     * 该方法用于broker上次正常关闭的时候恢复commitlog，其逻辑与recoverConsumeQueue恢复ConsumeQueue文件的方法差不多
+     * 当正常退出、数据恢复时，所有内存数据都已刷新到磁盘
+     * @param maxPhyOffsetOfConsumeQueue consumequeue文件中记录的最大有效commitlog文件偏移量
      */
     public void recoverNormally(long maxPhyOffsetOfConsumeQueue) {
+        /**
+         * 是否检查消耗记录的CRC32。默认为true
+         * 目的是：
+         *      这样可以确保消息不会发生在线或磁盘损坏。
+         *      该检查增加了一些开销，因此在寻求极端性能的情况下可能会禁用该检查。
+         */
         boolean checkCRCOnRecover = this.defaultMessageStore.getMessageStoreConfig().isCheckCRCOnRecover();
         final List<MappedFile> mappedFiles = this.mappedFileQueue.getMappedFiles();
         if (!mappedFiles.isEmpty()) {

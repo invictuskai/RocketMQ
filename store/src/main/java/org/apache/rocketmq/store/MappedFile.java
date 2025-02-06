@@ -197,13 +197,19 @@ public class MappedFile extends ReferenceResource {
     // 参数一：文件名  绝对路径文件名
     // 参数二：文件大小
     private void init(final String fileName, final int fileSize) throws IOException {
+        /**
+         * 文件名 长度为20 左边补零，剩余为起始偏移量
+         * 如果一个文件大小为1g，比如0000000000000000000000代表了第一个文件，起始偏移量尾0
+         * 文件大小为1G=1073741824；当第一个文件写满了，第二个文件为00000000001073741824，起始偏移量为1073741824
+         */
         this.fileName = fileName;
+        // 文件大小 默认为1g
         this.fileSize = fileSize;
 
         // 创建文件对象
         this.file = new File(fileName);
 
-        // 文件名转long
+        // 构建文件起始索引，就是创建文件名
         this.fileFromOffset = Long.parseLong(this.file.getName());
 
         // 标志位
